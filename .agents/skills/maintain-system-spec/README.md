@@ -13,8 +13,9 @@ It works in any repo set up by
 next to the code.
 
 > Agent instructions: [SKILL.md](SKILL.md). Spec format:
-> [format.md](format.md). Sub-agent prompts: [records.md](records.md). Why it
-> works this way: [DECISIONS.md](DECISIONS.md).
+> [format.md](format.md). Sub-agent prompts: [records.md](records.md). The
+> system-spec rule check other skills run: [rule-check.md](rule-check.md). Why
+> it works this way: [DECISIONS.md](DECISIONS.md).
 
 ## One-time setup
 
@@ -24,8 +25,9 @@ tab; open a new one only if it's not picked up.
 If the agent doesn't know how, you haven't set up the skill manager yet — do
 [Install](../../../README.md#install) in the repo root first.
 
-`create-system-spec` needs this skill installed. The skill manager does not
-install dependencies for you, so install this one alongside it.
+`create-system-spec` needs this skill installed, and `bug-hunter` needs it
+for its system-spec rule check. The skill manager does not install
+dependencies for you, so install this one alongside them.
 
 ## Using it
 
@@ -48,6 +50,17 @@ skill in branch mode on the specs your branch touches, and stop to ask you if
 it changes a spec or finds a broken rule. No such workflow skill is included
 in this repository; without one, ask for a check before you open the PR.
 
+**Every commit, the rule check.** `bug-hunter` (and a pull-request workflow
+skill, if you add one) runs a lighter check from this skill,
+[rule-check.md](rule-check.md): which rules a change breaks, and whether a
+committed change doc approved that. `bug-hunter` records what it let through
+in a rule-change chart, a committed log under `system-spec-changes/` with one
+file per branch. A workflow skill would ask you about each rule once at the
+pull request and write your decision into it. None is included here, so you
+settle rule changes by running this skill yourself; until then the entries
+stay undecided. Entries are never removed, so the log shows when and why
+each rule changed.
+
 **Other things to ask for:**
 
 > Add a system spec for `src/pages/invoices/`
@@ -56,6 +69,14 @@ in this repository; without one, ask for a check before you open the PR.
 > Confirm the looser `BILLING-04`, it was intended
 
 ## Reading the report
+
+**Open changes come right after the first word.** When a rule was left
+open — you answered *skip for now* and recorded the skip, at the pull
+request through a workflow skill or in a hand run — its spec carries an
+`Open change:` line under that rule. Every run lists those before
+anything else. When you
+ask for a check, it then asks you to settle each one: update the rule, or
+change the code back. Until you do, it asks again on every run.
 
 The report starts with one word:
 
@@ -93,3 +114,9 @@ and the agent changes the rule.
 
 **It checked nothing in my pull request** — no changed file matched a spec's
 scope, so it returned "skipped: no specs touched". That is expected.
+
+**It keeps asking about an open change** — a rule still has an `Open change:`
+line. Answer *update the rule*, or change the code back; once an on-demand
+run reads the whole scope and finds the rule holds, it removes the line. A
+pull-request workflow skill adds these lines when installed; without one,
+one is added only when you record a skip in a hand run.

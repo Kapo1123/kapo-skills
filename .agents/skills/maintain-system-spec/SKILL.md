@@ -26,6 +26,16 @@ Spec and master formats: [format.md](format.md). Sub-agent prompts:
 [records.md](records.md). Why each rule is the way it is:
 [DECISIONS.md](DECISIONS.md).
 
+[rule-check.md](rule-check.md) holds the system-spec rule check and the
+rule-change chart, a committed log under `system-spec-changes/`, that
+`bug-hunter` uses, and a pull-request workflow skill too when one is
+installed. This skill does not run that check; it keeps the brief because
+the brief reads specs in this skill's format.
+
+The workflow skill is optional and not in this repository. Without it, the
+person settles rule changes by running this skill themselves, and chart
+entries stay undecided until they do.
+
 ## Hard stops
 
 - Do **not** run without a `SYSTEM_SPECS.md` that has the format marker. Suggest `create-system-spec`. In branch mode, return `skipped: no system specs` instead.
@@ -33,6 +43,8 @@ Spec and master formats: [format.md](format.md). Sub-agent prompts:
 - Do **not** commit, push, or open a pull request. Edits stay uncommitted for review.
 - Do **not** let a sub-agent write. Only the main agent writes.
 - Do **not** rewrite a rule to match code that breaks it. Report it as a probable bug.
+- Do **not** add an `Open change:` line on your own. A pull-request workflow skill writes one when installed. Without one, add it only in a hand run, when the person answers *skip for now* for that rule and chooses to record the skip. Do **not** settle an open change without the person's answer.
+- Do **not** edit files under `system-spec-changes/` on your own. They are a committed log. A workflow skill writes chart decisions when installed; without one, write a decision into an entry only when the person gives it in a hand run and asks you to record it.
 - Do **not** write a looser rule until the person confirms it.
 - Do **not** split a spec, or draft a new one, until the person approves it.
 - Do **not** move a spec's last verified commit unless [Step 7](#step-7--write-edits-and-update-the-master) allows it.
@@ -43,7 +55,7 @@ Spec and master formats: [format.md](format.md). Sub-agent prompts:
 Maintain system specs:
 - [ ] Step 1: Name the repo and the mode
 - [ ] Step 2: Load the master index
-- [ ] Step 3: Index hygiene
+- [ ] Step 3: Index hygiene, and list open changes
 - [ ] Step 4: Pick the due specs
 - [ ] Step 5: Check each due spec in its own read-only sub-agent
 - [ ] Step 6: Spot-check and decide each rule
@@ -64,7 +76,9 @@ Pick the mode:
 - **On demand:** anything else. Check the specs the person names, or every
   due spec when they name none. "Check every spec" names them all.
 
-Run `git fetch origin main`. Read only files git tracks, plus new files on
+Run `git fetch origin`. The default branch is the one `origin/HEAD` points
+at (`git symbolic-ref --short refs/remotes/origin/HEAD`, such as
+`origin/main` or `origin/master`). Read only files git tracks, plus new files on
 this branch: list them with `git ls-files` and
 `git ls-files --others --exclude-standard`. Gitignored build output such as
 `infra/cdk.out/`, `target/`, and `build/` holds stale copies of source and
@@ -98,16 +112,38 @@ Also report, without fixing:
   `*.system-spec.md` with no Rules section)
 - a rule file that keeps its own list of specs instead of linking the master
 
+**Open changes.** List every rule that carries an `Open change:` line, in any
+spec, due or not:
+
+```bash
+git grep -n -E '^[[:space:]]+- Open change: .+, [0-9]{4}-[0-9]{2}-[0-9]{2} — ' -- ':(glob)**/*.system-spec.md'
+```
+
+The pattern is the field's own form ([format.md](format.md#open-changes)),
+so a rule, a Reason or a link that only mentions the words is not listed.
+The branch part is `.+`, not `[^,]+`: git allows a comma in a branch name.
+
+Each one is a rule the code and the spec disagree on, left open by a
+recorded skip ([format.md](format.md#open-changes)). For context, the chart entry
+for that rule, if there is one under `system-spec-changes/`, says when it was
+skipped and what changed; show it, but nothing here depends on it. Every run reports them first,
+until none remain. On demand, its spec is due (Step 4), so a check sub-agent
+reads whether the code still breaks it.
+
 ## Step 4 — Pick the due specs
 
 **Changed files.**
 
 - On demand: run `git diff -M --name-status <oldest last verified commit>..HEAD`
   once. A spec at `never` counts every scope file as changed.
-- Branch mode: take the merge base `base=$(git merge-base origin/main HEAD)`,
+- Branch mode: take the merge base with the default branch,
+  `base=$(git merge-base "$(git symbolic-ref --short refs/remotes/origin/HEAD)" HEAD)`,
   then join `git diff -M --name-status "$base"..HEAD`,
   `git diff -M --name-status HEAD`, and
-  `git ls-files --others --exclude-standard`.
+  `git ls-files --others --exclude-standard`. If `git merge-base` fails or
+  prints nothing, stop and return `blocked: no merge base with the default branch`.
+  Not `skipped`: with an empty base, `"$base"..HEAD` compares `HEAD` with
+  itself, prints nothing, and exits 0.
 
 Where git reports a rename of a file a Scope glob names, update the glob in
 the spec and the master.
@@ -116,12 +152,12 @@ the spec and the master.
 
 | Mode | A spec is due when |
 |------|--------------------|
-| On demand | The person named it; or a scope file changed since its last verified commit; or it was last verified 4 or more weeks ago; or its last check was partial; or it is `never` |
+| On demand | The person named it; or a scope file changed since its last verified commit; or it was last verified 4 or more weeks ago; or its last check was partial; or it is `never`; or a rule in it has an `Open change:` line |
 | Branch | A changed file matches its Covers globs; or it has a repo-wide rule and a changed file is code |
 
 In branch mode, a spec due only because of a repo-wide rule checks only its
-repo-wide rules. If no spec is due in branch mode, return
-`skipped: no specs touched`.
+repo-wide rules. If no spec is due in branch mode, skip Steps 5–7 and go
+directly to [Step 8](#step-8--report).
 
 **Uncovered changes.** A changed source file that no spec covers and no
 `Uncovered` entry names: add its folder to `Uncovered`. If it looks like it
@@ -151,7 +187,9 @@ the report.
 **Check before acting:**
 
 - Read each Coverage line. If a sub-agent claims full but lists a file read
-  partly or not at all, count the check as partial.
+  partly or not at all, or gives no count of files read completely out of
+  files to read, count the check as partial. Only a full claim with that
+  count, and every file read, is full coverage.
 - Open the cited code for every `spec is stale` and every `code breaks it`
   verdict, and confirm it. Do not re-prove `holds`.
 - You may run a rule's enforcing test to confirm a verdict, when the repo's
@@ -163,8 +201,8 @@ the report.
 
 | Verdict after your check | What to do |
 |--------------------------|------------|
-| holds | Nothing. Fix the Evidence line if the cited line moved |
-| code breaks it | Report a probable bug with `file:line`. Leave the rule as it is |
+| holds | Nothing. Fix the Evidence line if the cited line moved. If the rule has `Open change:` lines: on demand, with full coverage after your check, the code was changed back, so remove them. In branch mode, or with partial coverage, leave them and list the rule under Open changes as holding where read |
+| code breaks it | Report a probable bug with `file:line`. Leave the rule as it is. If the rule has an `Open change:` line, report it under Open changes instead, not as a bug |
 | spec is stale, stricter or wording only | Edit the spec |
 | spec is stale, looser | Do not edit. Report it as held for the person to confirm |
 | can't verify | Report it with the reason |
@@ -219,10 +257,18 @@ Start with the outcome, exactly one of:
   and Last check forward does not count as an edit.
 - **changed:** spec edits made. List them.
 - **blocked:** no spec edits, but the specs are not current. Say what blocked
-  it: a rule the code breaks, a looser change waiting for confirmation, or a
-  check that could not run.
+  it: a rule the code breaks, a looser change waiting for confirmation, an
+  open change the code still breaks (on demand only), or a check that could
+  not run. In branch mode, and for an open change not checked this run, open
+  changes are listed and do not change the outcome.
 
 In branch mode, a run with nothing to check returns `skipped: <why>` instead.
+
+Then, before anything else, **Open changes**, whenever Step 3 found any:
+rule ID, spec, each `Open change:` line, and whether the code still breaks the
+rule (or "not checked this run"). On demand, settle each one after the report
+([Settling an open change](#settling-an-open-change)). In branch mode, list
+them; the caller asks.
 
 Then, leaving out empty sections:
 
@@ -247,6 +293,30 @@ When the person confirms a held looser change, make that edit and say it is
 uncommitted. When they reject it, leave the rule: the code is what needs to
 change. Nothing records a rejection, so later checks report it again until
 the code is fixed.
+
+## Settling an open change
+
+On demand, after the report, ask about each open change the code still
+breaks, one question per rule, with the host's picker when it has one, and
+end the turn:
+
+**`<RULE-ID>` has an open change from `<branch>`: <the new behavior>. Settle it?**
+
+A rule with lines from several branches is one question that names each
+branch and behavior.
+
+- Update the rule — rewrite it to the new behavior, remove its `Open change:` lines
+- Change the code back — the code is yours to change; the rule stays
+
+On *update the rule*, the main agent rewrites the rule in place and keeps
+its ID, points `Enforced by` and `Evidence` at what the check sub-agent
+cited, and removes the lines. This is a looser edit the person confirmed, so
+it is written. On *change the code back*, edit nothing: this skill never
+edits product code. The lines stay until an on-demand run with full coverage
+finds the rule holds; then Step 6 removes them. A branch-mode run, or one
+with partial coverage, reads only part of the code, so its `holds` leaves
+them. An open change with no answer stays, and the next run asks again.
+Edits are uncommitted, as always.
 
 ## Approved proposals
 

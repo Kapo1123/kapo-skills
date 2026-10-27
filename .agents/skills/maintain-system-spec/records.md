@@ -21,7 +21,7 @@ Commit: <full HEAD commit>
 Mode: <"on demand" or "branch">
 Spec: <absolute path to the spec file>
 Format: <absolute path to maintain-system-spec/format.md>
-Scope files: <"run git ls-files ':(glob)<glob>' for each Scope glob in the spec">
+Scope files: <"for each Scope glob in the spec, set GLOB to it and run git ls-files -- \":(glob)$GLOB\"">
 Rules to check: <"all", or "only the rules marked Scope: repo-wide">
 Changed files in scope: <from git diff -M --name-status, or "first check, read all">
 Other changed files: <changed files outside this spec's scope, or "none">
@@ -41,11 +41,11 @@ Do this:
    - can't verify: the evidence is in another repo, at runtime, or not readable.
    When unsure between "code breaks it" and "spec is stale", say "code breaks it" and explain. Never suggest rewriting a rule to match code that breaks it.
 6. For "spec is stale", say whether your suggested edit makes the rule stricter, looser, or only changes wording. Looser means it allows more, checks less, widens a contract, or removes the rule.
-7. For a rule marked (inferred) that holds, give the file:line that shows it.
+7. For a rule marked (inferred) that holds, give the file:line that shows it. For a rule with an Open change line, give the verdict as usual; the line says the code and the rule disagree, and your verdict says whether they still do.
 8. Note behavior in scope that other code relies on and the spec does not state. Give file:line.
 9. Note files outside Scope that keep or break a rule here, and Scope globs that match no file.
 10. Note unenforced rules that a test, a type, or a lint rule could enforce, and how.
-11. Note anything in the spec the format forbids: function signatures, class or endpoint lists, config copies, generic principles, ticket or PR history, TEMPORARY notes, status tables, future plans, Version or Last updated headers, rules cited by position or range, rules without an Enforced by or Evidence line.
+11. Note anything in the spec the format forbids: function signatures, class or endpoint lists, config copies, generic principles, ticket or PR history, TEMPORARY notes, status tables, future plans, Version or Last updated headers, rules cited by position or range, rules without an Enforced by or Evidence line. An Open change line in the form the format gives is allowed; note only one that is malformed or a second one from the same branch on the same rule.
 
 Return exactly these sections, as plain lines. No tables.
 Coverage: full or partial. Full means every file step 2 names was read completely and every repo-wide search ran. Give files read completely out of files to read, and list each file read partly or not at all.

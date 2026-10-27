@@ -16,21 +16,42 @@ something.
 1. **Triages** the staged change with a cheap model, from the diff alone —
    docs-only, formatting, renames and reverts are skipped, and so is a
    checkpoint you ask for, so it doesn't hound you on every checkpoint commit.
-2. **Finds** candidate bugs with Grok 4.7 (`grok-4.7-high-fast`). A small
-   diff stays on one agent. A larger one is split across a few agents — by area, or by bug
-   class when the diff is one area and the hunt is long — and the parent
-   merges what they return. Each candidate has to name a real caller and a
-   concrete input that reaches it. Style opinions are banned.
-3. **Proves** each candidate with a regression test that fails now and will
+2. **Finds** candidate bugs on a fast model (Grok 4.7, `grok-4.7-high-fast`,
+   by default — see [Models](#models)). The number of finders follows the
+   size of the change: one up to 50 changed lines, two up to 300, four
+   above that. Two or four split the work by area when the change has at
+   least that many areas, and by bug class otherwise, and the parent merges
+   what they return. Ask for a
+   **heavy hunt** and it uses four finders on a stronger model on every pass.
+   Each candidate has to name a real caller and a concrete input that reaches
+   it. Style opinions are banned.
+3. **Checks the system specs**, if your repo has them (a `SYSTEM_SPECS.md`
+   index and `*.system-spec.md` files) and `maintain-system-spec` is
+   installed. One more agent, beside the finders, reads the rules that cover
+   the change, as committed, and reports any the change breaks. A break that a
+   change doc committed before the code approved, or that you already called
+   intentional, goes in a committed rule-change chart, in the same commit, and
+   the commit goes ahead. Any other break pauses the commit until you answer:
+   **continue** (it's intentional) or **stop and fix**. It never edits a spec; what happens to
+   each rule is decided once, later. A pull-request workflow skill can ask at
+   the pull request, but none is included here and it is optional; without
+   one, you settle rule changes by running `maintain-system-spec` yourself.
+   In a repo without system specs this is one line suggesting
+   `create-system-spec`.
+4. **Proves** each candidate with a regression test that fails now and will
    keep failing if the bug ever comes back.
-4. **Refutes** — a second agent, on the same Grok, tries to kill each finding
-   (unreachable, guarded upstream, intentional). Only survivors get fixed.
-5. **Fixes** by resuming that Grok finder, which first has to ask *"is there a better
+5. **Refutes** — a second agent, on a more careful model (Sonnet by default),
+   tries to kill each finding (unreachable, guarded upstream, intentional).
+   Only survivors get fixed.
+6. **Fixes** by resuming that finder, which first has to ask *"is there a better
    approach that would have prevented this class of bug entirely?"* and prefers
    the simpler one.
-6. **Verifies** the new tests pass and your existing suite is no worse.
-7. **Iterates** up to three times, then commits — or, if it is still finding
-   things at three, stops and hands you a report on why this piece of work keeps
+7. **Verifies** the new tests pass and your existing suite is no worse.
+8. **Iterates** up to three times, then commits. After the first pass, a
+   normal run reads only what its own fixes changed, plus the files they sit
+   in; a heavy run re-reads the whole change every time. A finding it could
+   not test is reported once and not hunted again. It commits — or, if it
+   is still finding things at three, stops and hands you a report on why this piece of work keeps
    producing bugs. Three is the whole budget and it never asks you for a fourth
    iteration. Anything still unresolved comes back as a numbered root cause with
    three options on it: a fresh run scoped to that one cause, write it down as a
@@ -42,7 +63,7 @@ fixed**. It won't quietly refactor your codebase.
 
 ## Setup
 
-Nothing to configure. Installing the skill also turns on a hook that **notices
+Nothing is required; the models can be changed ([Models](#models)). Installing the skill also turns on a hook that **notices
 any commit that lands without having been checked**, on both Claude Code and
 Cursor:
 
@@ -55,6 +76,29 @@ bug-hunter ships a hook, enabled by default:
 ```
 
 Restart Cursor to pick it up.
+
+### Models
+
+Each step runs on a role's model, and each role has an ordered list: the
+agent passes the first entry your host offers. See the lists with:
+
+```bash
+python3 ~/.agents/skills/bug-hunter/scripts/models.py
+```
+
+By default the finders, triage and the system-spec check use Grok first, and
+the refuters use Sonnet, then Opus. Every list ends in `inherit`, which runs
+the step on the agent's own model. To change a role, add it to
+`~/.config/kapo-skills/config.json` (the file `manage-skills` keeps):
+
+```json
+{"bug-hunter": {"models": {"finder_light": ["sonnet", "inherit"]}}}
+```
+
+An entry is an exact slug, a family word (`grok`, `sonnet`, `opus`, `haiku`)
+meaning its highest version, or `inherit`. A broken entry prints a
+`warning` and only that role falls back to its default; a broken file puts
+every role on its default. It never stops a hunt.
 
 The hook exists because an instruction in a `CLAUDE.md` is advisory — an agent
 can skip it, and does exactly when you're in a hurry.
@@ -221,9 +265,39 @@ will never `git stash` your work to get around this.
 formatting, was a pure rename or move, or you asked for a checkpoint. Ask for
 the skill by name to force a review.
 
+**It paused my commit for a system-spec rule break.** The change breaks a
+rule in a system spec, and no change doc committed before the code says you
+decided that. A doc written with the change does not count, even if it was
+committed first in its own commit, because the agent could have written both.
+Answer **continue** if the break is intentional, or **stop and fix** if it's a
+bug. To approve ahead of time, commit the OpenSpec or spec-kit change that
+records the decision before work on the code starts, not in the session that
+writes it.
+
+**Where are the rule changes kept?** In `system-spec-changes/`, beside
+`SYSTEM_SPECS.md`, one file per branch (`dev/you/topic` becomes
+`dev--you--topic-9eae6c63.md`; the end is a hash of the branch name). Each entry is committed with the code that made the
+change. A pull-request workflow skill, if you add one, asks you about each
+rule once and writes your decision into the entry. Without one, entries stay
+undecided until you run `maintain-system-spec` and record your decisions
+yourself. Nothing is ever removed, so after merge the files on
+`main` show when and why each rule changed. A commit that touches only those
+files is skipped like any docs change.
+
+**It edited only a spec, or made a checkpoint, and it still ran a check.** A
+spec-only commit or a checkpoint skips the hunt but not the system-spec rule
+check. Otherwise a rule could be loosened in one commit and broken in the
+next, or broken in a checkpoint no later commit would re-read.
+
 **It reviewed a commit whose subject said `WIP`.** Triage doesn't read the
 subject. To skip a work-in-progress commit, ask for a checkpoint in the
 conversation.
+
+**How do I run a heavy hunt?** Say so when you ask it to commit: "commit
+this, heavy hunt" or "run bug-hunter heavy". A heavy run uses four finders on
+every pass, on the `finder_heavy` model (Sonnet by default), and its trailer
+ends with `, heavy`. The agent never picks heavy for you and never drops a
+heavy run to light.
 
 **It aborted after three iterations.** It kept finding new bugs each pass, so it
 stopped and left everything uncommitted. The report explains what about this
@@ -243,8 +317,9 @@ entries with three options each — and pick per entry.
 
 **It's slow.** Slower than a one-shot review bot, on purpose: it proves each
 bug with a failing test and runs your suite. The find itself is no longer one
-agent walking the whole diff — a small change stays on one agent, and a
-larger one is a few parallel slices. Triage still exists so checkpoint and
+agent walking the whole diff. In a normal (light) run, up to 50 changed
+lines stays on one agent and a larger change gets two or four parallel
+finders; a heavy run always uses four. Triage still exists so checkpoint and
 docs commits never pay for that.
 
 **It told me a commit wasn't checked and I don't want to redo it.** Record why,

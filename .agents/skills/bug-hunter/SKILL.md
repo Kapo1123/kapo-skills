@@ -12,7 +12,11 @@ description: >-
   of them, let it.
   Finds candidate bugs in the staged change, proves each one with a
   regression test that actually fails, refutes the weak ones, fixes what
-  survives, and re-verifies. Docs, specs, tests and work-in-progress commits
+  survives, and re-verifies. Light by default; a heavy hunt, with four
+  finders on every pass, only when the user asks for one. In a repo with system specs, a separate
+  system-spec rule check records each rule change in a committed log,
+  and pauses the commit for the user on any break no change doc approved.
+  Docs, specs, tests and work-in-progress commits
   skip the hunt, not this skill — they still commit through its script,
   carrying a `Bug-hunter: skipped` trailer. When a caller's brief says
   "caller commits", run in full but do not commit: leave the change staged and
@@ -44,6 +48,8 @@ It edits the working tree, adds test files, and by default commits.
    refutes, is **dropped** — and its test is deleted, never left failing.
 3. Anything real but out of scope or untestable is **reported, not fixed**.
 4. The full test suite ends no worse than it started.
+5. No commit lands over a system-spec rule break that neither a committed
+   change doc nor the user approved.
 
 ## Workflow checklist
 
@@ -51,13 +57,15 @@ It edits the working tree, adds test files, and by default commits.
 - [ ] Step 0: Scope the change — staged diff only
 - [ ] Step 1: Triage — is this commit worth reviewing at all?
 - [ ] Step 2: Baseline — run the suite before touching anything
-- [ ] Step 3: Find candidates — one agent on a small diff; otherwise parallel slices (cap 4), then merge without re-reading
+- [ ] Step 3: Find candidates — light by default, heavy only when asked; 1, 2 or 4 finders by changed lines (heavy: 4), then merge without re-reading
+- [ ] Rule check: the system-spec rule check in its own subagent, launched with the finders — or one line saying the repo has no system specs
 - [ ] Step 4: Prove — write the test, run it, demand a matching red
 - [ ] Step 5: Refute — a second opinion tries to kill each proven bug
 - [ ] Step 6: Fix (resume this iteration's finder, prevention question, scope-confined)
-- [ ] Step 7: Verify — new tests green; the full suite once, before Step 9
-- [ ] Step 8: Iterate — back to back, up to 3, without asking; never a 4th
+- [ ] Step 7: Verify — new tests green; the full suite once, before Step 9; stage this iteration's fixes and tests
+- [ ] Step 8: Iterate — back to back, up to 3, without asking; never a 4th; light runs read the fixes' delta, settled candidates are not re-hunted
 - [ ] Step 9: Report once at the end; ask the user each open decision (picker — written is not asked); then commit (with prose's trailer when prose is installed) or leave it for review — or, under "caller commits", end with `scripts/caller-result.sh`'s block
+- [ ] Before any commit, mint or result block: the rule check has returned (or the user decided what to do about a failed one), and every paused system-spec rule break has the user's answer (continue / stop and fix)
 ```
 
 Never run this from inside a git `pre-commit` hook. It writes files, adds
@@ -178,6 +186,8 @@ skip this skill on a commit that then shipped a bug:
 - *the session is long and this is expensive* — a run that finds nothing is
   cheap, triage stops most commits before the expensive part, and a large find
   is a few parallel slices rather than one agent walking the whole diff (Step 3)
+- *heavy costs more than this needs* — heavy is the user's call, made when
+  they asked for it; a heavy run is never dropped to light
 - *I already ran it on related code earlier* — you did not run it on this
 - *this is the skill's own machinery, not real code* — it is real code, and the
   worst bugs in this skill's own history have been in exactly that machinery
@@ -203,15 +213,18 @@ them is choice 3 taken silently.
 
 **Yours, never asked.** Whether to run and when; whether a candidate is proven,
 refuted or dropped; how to fix a proven bug inside the change; whether to
-iterate, up to the cap; running the suite; committing a run that ended clean
-with nothing open — except under *caller commits*, where the commit is the
-caller's.
+iterate, up to the cap; running the suite; whether the repo has system specs
+and which ones cover the change; committing a run that ended clean with
+nothing open — except under *caller commits*, where the commit is the
+caller's; whether a rule break continues, when a committed change doc or the
+user's earlier reply already approved it.
 
 **The user's, always asked.** What to act on: each root cause and each
 recommendation (fix now / write it down / skip), each unresolved entry of an
-abort, whether a commit goes ahead when something reported-not-fixed changes
-what it means (report-only mode), and the Step 0 stop — which of a file's
-diverging staged and unstaged edits to keep.
+abort, each paused system-spec rule break (continue / stop and fix), whether
+a commit goes ahead when
+something reported-not-fixed changes what it means (report-only mode), and the
+Step 0 stop — which of a file's diverging staged and unstaged edits to keep.
 
 **When you do ask, use the host's interactive picker**: any question with
 discrete options goes through it, one question per decision, in severity order,
@@ -275,7 +288,8 @@ those files are still context worth reading.
 ## Step 1 — Triage
 
 **Triage decides from the diff, not from the commit message.** Delegate a
-single fast pass to a **small, cheap model**. Give it the file list, the diff,
+single fast pass to the `triage` role's model ([Models by
+role](#models-by-role)). Give it the file list, the diff,
 and whether the user asked for a checkpoint (below). Ask for one of `REVIEW` or
 `SKIP` plus a one-line reason. Do not ask for a commit message first, and do
 not read a subject prefix as a signal — this skill imposes no commit
@@ -284,7 +298,7 @@ convention ([reference.md](reference.md#what-triage-skips)).
 `SKIP` when the diff shows:
 
 - Nothing outside docs, specs, tests, lockfiles, generated or vendored files
-  changed.
+  changed. The rule-change chart under `system-spec-changes/` counts as docs.
 - The change is purely formatting, renames, moves, or comments — no behavior
   is different.
 - It is git's own revert or merge.
@@ -302,6 +316,10 @@ a valid skip reason.
 If the user explicitly asked for this skill, run it regardless of triage.
 
 On `SKIP`, print the report (Step 9) with the skip reason and stop hunting.
+If the skip is a checkpoint, or the diff edits or deletes a
+`*.system-spec.md` file, run the [system-spec rule
+check](#alongside-step-3--the-system-spec-rule-check) before the commit
+anyway: a skip skips the hunt, not that check.
 **`SKIP` is a value for the trailer, not an exemption from it** — the commit
 still goes through `commit-with-trailer.sh` with
 `skipped at triage (<reason>)` as its third argument ([Step
@@ -318,7 +336,7 @@ actually landed — this is what keeps a false alarm cheap, and
 
 | what the reported commit is | response |
 |---|---|
-| docs, formatting, a rename, a revert — any skip category | `git commit --amend --no-edit --trailer "Bug-hunter: skipped at triage (<reason>)"` |
+| docs, formatting, a rename, a revert — any skip category | `git commit --amend --no-edit --trailer "Bug-hunter: skipped at triage (<reason>)"` — but if it edits or deletes a `*.system-spec.md` file, run the system-spec rule check over that commit first ([rule-check.md](../maintain-system-spec/rule-check.md#slots)), and amend only after the user has answered every paused break |
 | not new work at all — the hook misfired on a branch switch, a replay, a commit that predates the hook | the same amend, with `Bug-hunter: not new work (<what it actually was>)`, and say the hook misfired |
 | real code | get the change back in front of you and run the full loop, then record the trailer |
 
@@ -336,8 +354,8 @@ same turn; the finders launch while it runs. Record the result when it
 prints. If something is already failing, note it as the baseline. You are not
 responsible for pre-existing failures, but you must not add to them, and you
 must not mistake one for a bug you found. This is running a command and
-writing down what it printed — a **small, cheap model** is sufficient. The
-finders must not run this same full suite.
+writing down what it printed — if you delegate it, the `mechanical` role's
+model is sufficient. The finders must not run this same full suite.
 
 ## Step 3 — Find candidates
 
@@ -346,38 +364,64 @@ The parent stays thin. It has already scoped the diff (Step 0) and triaged it
 and merges what they return. It does not hunt.
 
 A reviewable file is a staged file that is not docs, specs, tests, a lockfile,
-or generated or vendored. Changed lines are the added plus deleted counts from
-`git diff --cached --numstat` on those files. One area means those files share
-a directory, or one file plus the code in this diff that it directly calls.
-Two directories are two areas unless one exists only to serve the other in
-this diff.
+or generated or vendored. One area means those files share a directory, or
+one file plus the code in this diff that it directly calls. Two directories
+are two areas unless one exists only to serve the other in this diff.
 
-**A small diff stays on one agent.** One finder, the whole reviewable diff,
-when either of these is true:
+**Count the changed lines with git, not by eye:**
 
-- under 40 changed lines in total, however the files are laid out and however
-  many classes you could name, or
-- one area, at most 3 reviewable files, under 150 changed lines, and only one
-  bug class below applies.
+```bash
+git diff --cached -M --numstat -- ':(top)' ':(top,exclude)system-spec-changes/**'
+```
 
-That one finder still does the full hunt, all four classes. Small is not a
-skip (Step 1), and it is not a reason to spawn a fleet.
+The `:(top)` pathspecs count the whole repository from whatever folder you
+are in; a plain `.` would count only the current folder. Sum the added and deleted columns over the reviewable rows only. A binary
+file (`-`) counts 0, and so does a pure rename. The report's `scope` line
+gives the count and names every staged file left out of it, so the count can
+be checked.
 
-**Otherwise fan out, and cap it at 4 finders.** Never both splits at once:
-area slices, or bug-class slices. Splitting by area and then by class in the
-same pass is how a short diff becomes a dozen agents.
+### Light or heavy
 
-- **Several areas — split by area.** One finder per area when the reviewable
-  files are more than one area. More than 4 areas: merge the most related
-  until 4 remain. Do not give a finder one file when that file's caller in
+**Light is the default.** A run is **heavy** only when the user asked for
+it in this conversation — "heavy hunt", "run bug-hunter heavy", or the same
+in other words — or when a caller's brief says `mode: heavy`. Do not choose
+heavy yourself and do not offer it. Never drop a heavy run to light because
+it is slow; that is the user's call, made already. A run that follows from
+another run — a root cause's option 1, the new run after *stop and fix* —
+keeps that run's mode. A new commit request starts light.
+
+**How many finders:**
+
+| Changed lines | Light | Heavy |
+|---|---|---|
+| 1–50 | 1 | 4 |
+| 51–300 | 2 | 4 |
+| over 300 | 4 | 4 |
+
+No reviewable lines at all is a triage skip (Step 1), not a find. Four is
+the cap in both modes. A heavy run spawns four finders on every iteration,
+and every iteration re-reads the whole change: no delta. Split by area,
+each finder reads its own area of the whole change; split by class, each
+reads all of it.
+
+**One finder does the full hunt, all four classes.** Small is not a skip
+(Step 1), and it is not a reason to spawn a fleet.
+
+**Two or four finders split one way, never both.** Area slices, or
+bug-class slices. Splitting by area and then by class in the same pass is how
+a short diff becomes a dozen agents.
+
+- **By area, when the change has at least as many areas as finders.** One
+  slice per area. More areas than finders: merge the most related until the
+  count is right. Do not give a finder one file when that file's caller in
   this diff sits in another slice; keep that pair together.
-- **One area, long checklist — split by bug class.** When an area split would
-  be a single finder, and at least two of the classes below can actually fire
-  in this diff, and the change is not the under-40-lines case above:
-  one finder per class that applies. There are only four classes, so the cap
-  holds. A class that cannot fire is not spawned. If only one class applies,
-  stay on one finder even when the file is long — do not chop one area into
-  file piles. The interaction is why the finder reads the whole file.
+- **Otherwise by bug class.** Two finders take classes 1 and 2, and 3 and 4.
+  Four finders take one class each. Each finder still reads every
+  reviewable file in full — the interaction is why. In a light run, a pair
+  or class that cannot fire in this diff is not spawned, and the count drops
+  with it. When it drops to one finder, that finder hunts all four classes,
+  as any single finder does. In a heavy run all four are spawned: a finder with nothing to find
+  returns `none` quickly, and the user asked for the redundancy.
 
 The classes are the hunt this skill already does, named so two finders do not
 walk the same questions in series:
@@ -390,26 +434,84 @@ walk the same questions in series:
 4. **Trusted boundary** — a caller, schema, stored record, or config the new
    code trusts and does not check.
 
-Each finder uses the best Grok model. On Cursor that slug is
-`grok-4.7-high-fast` — pass it as the Task `model`. Do not pass a heavier
-model (Fable, Opus, or whichever slug the host lists as strongest), and do
-not drop to an older or smaller Grok to shorten the run. If
-`grok-4.7-high-fast` is not in the host's model list, pass the listed Grok
-slug with the highest version; when several share that version, pass the one
-whose name includes `high`. Say which slug you passed. If the host lists no
-Grok model, omit `model` so the finder inherits the parent, and say the host
-has no Grok model. Do not substitute the heaviest non-Grok model.
+Each finder runs on the finder role's model: `finder_light`, or
+`finder_heavy` in a heavy run ([Models by role](#models-by-role)).
+
+### Models by role
+
+Every subagent this skill launches runs on its role's model. The roles and
+their ordered lists come from one script:
+
+```bash
+BM=~/.agents/skills/bug-hunter/scripts/models.py
+[ -f "$BM" ] || BM=~/.claude/skills/bug-hunter/scripts/models.py
+python3 "$BM"
+```
+
+It prints one `role` line per role, then any `warning` lines. The defaults
+live in the script. A person overrides a role in the kapo-skills config
+file, `~/.config/kapo-skills/config.json` (or `SHARED_SKILLS_CONFIG`),
+under `"bug-hunter": {"models": {<role>: [<entry>, ...]}}`. Run it once per
+run, before Step 1, and use its output for every launch in the run.
+
+| Role | Used for |
+|---|---|
+| `triage` | Step 1 |
+| `finder_light` | Step 3 finders, and a fresh Step 6 fixer, in a light run |
+| `finder_heavy` | the same, in a heavy run |
+| `refuter` | Step 5 refuters, and the fix-conflict question |
+| `rule_check` | the system-spec rule check, and a fresh stop-and-fix agent |
+| `mechanical` | Step 2 when delegated, and subagents that only edit to a decided outcome or commit |
+
+**Pass the first entry the host offers.** Go down the role's list:
+
+- **An exact slug**, such as `grok-4.7-high-fast`: pass it if the host
+  lists it.
+- **A family word**, such as `grok`, `sonnet`, `opus` or `haiku`: pass the
+  highest-version slug the host lists whose name contains that word. When
+  several share that version, pass the one whose name includes `high`, then
+  `thinking`.
+- **`inherit`**: omit `model`, so the subagent runs on your model. Every list
+  ends with it.
+
+Say which slug you passed for each role. Do not pass a heavier model than the
+entry you reached, and do not skip an entry to finish sooner.
+
+**A launch that fails on its model moves down the list.** When the host
+refuses the slug, or the subagent fails on quota or availability before it
+starts, launch it once more on the next entry that resolves to a
+different slug, and say which slug failed. An entry that resolves to a slug
+already tried in this run is skipped: after `grok-4.7-high-fast` fails, the
+family word `grok` would pick it again. When the list runs out, do that
+step in-process and say so. Never skip the
+step, and never drop a refuter.
+
+**A `warning` line goes in the report.** It means part of the config could
+not be used. A warning about one role means that role fell back to its
+default; the other roles keep their overrides. A warning about the whole
+file means every role is on its default. Either way the `role` lines are
+what the run uses, and it goes on.
+
+**Finders and refuters never all run on your model.** If this run's finder
+role and the `refuter` role both resolve to the model you run on — the slug
+the host runs you on, not a `Co-Authored-By` name, and `inherit` counts as
+that slug — pass the refuters the next entry in the `refuter` list that
+resolves to a different model. If none is, say so in the report. An in-process
+run, on a host with no subagents, cannot meet this; say that too. Why:
+[DECISIONS.md](DECISIONS.md#finders-and-refuters-never-all-run-on-the-main-agents-model).
 
 ### How to launch
 
 Launch every finder for this iteration in **one message**. The next finder
 does not wait for the previous one to return, and it is not launched from a
-later message. Wall-clock is the slowest slice, not the sum.
+later message. Wall-clock is the slowest slice, not the sum. When the
+[system-spec rule check](#alongside-step-3--the-system-spec-rule-check) is
+owed, launch it in that same message.
 
 | Host | Launch |
 |---|---|
-| Cursor | N `Task` calls in that one message. `subagent_type: generalPurpose`. `model: grok-4.7-high-fast` (the fallback in the paragraph above if that slug is missing). `run_in_background: true` — you are the coordinator, and a foreground task blocks you inside one finder. |
-| Claude Code | The same N prompts, all in one turn, as background agents. Same model rule as the paragraph above when the host can name a model. |
+| Cursor | N `Task` calls in that one message. `subagent_type: generalPurpose`. `model:` the slug [Models by role](#models-by-role) picked for the finder role. `run_in_background: true` — you are the coordinator, and a foreground task blocks you inside one finder. |
+| Claude Code | The same N prompts, all in one turn, as background agents. The same model rule, when the host can name a model. |
 | No subagent tool, or you are already a subagent and the host refuses another | You are the one finder. Say **find pass in-process — subagents unavailable**, and name the model you are — you cannot switch it. Same prompt, same bar. Do not claim you split. |
 
 A Cursor subagent does not see this conversation. Each prompt is the template
@@ -430,17 +532,17 @@ Do not edit files. Do not commit. Do not run the project's full test suite.
 
 Repo: <absolute path>
 Iteration: <1, 2, or 3>
-Slice: <area name and file paths, or one bug class name>
+Slice: <area name and file paths, or one or two bug class names>
 Other slices, do not hunt these: <paths, or "none">
-Bug class, if this slice is one class: <name, or "all four — this is the one finder">
+Bug classes, if this slice is split by class: <one or two names, or "all four">
 
-Review only the staged diff for your files:
-  git diff --cached -- <paths>
+Review only this diff for your files:
+  <the diff command: git diff --cached -- PATHS, or on a light delta pass git diff -M PREV_TREE CUR_TREE -- PATHS>
 Read each of those files in full, not only the hunks.
 
 Hunt this slice for plausible scenarios the code does not handle.
-If your slice is one bug class, that class is your whole hunt. The other
-classes are other finders.
+If your slice names bug classes, those classes are your whole hunt. The
+other classes are other finders.
 
 Every candidate needs all of these:
 - scenario — what situation the code does not handle
@@ -463,8 +565,10 @@ One block per candidate, with the fields above. Do not fix anything.
 ```
 
 The instructions above the slice slots stay byte-stable across slices and
-across iterations. Put per-iteration notes — what the last pass changed —
-after the template, not inside it.
+across iterations. Put per-iteration notes — what the last pass changed,
+[the settled list](#the-settled-list), and on a delta pass the context
+lines from [The delta pass](#the-delta-pass) — after the template, not
+inside it.
 
 ### What every candidate still is
 
@@ -530,7 +634,160 @@ other work and sits in your context is how a run quietly never ends.
 
 Each iteration spawns fresh finders. Do not resume the previous iteration's
 finders to hunt the code they just changed. Step 6 resumes a finder only to
-fix, and only inside this iteration.
+fix, and only inside this iteration. In a light run, iterations 2 and 3 read
+only what the last fixes changed ([The delta pass](#the-delta-pass)); in a
+heavy run every iteration reads the whole change.
+
+## Alongside Step 3 — the system-spec rule check
+
+**A system spec lists rules a change must not break.** It is a
+`<concern>.system-spec.md` file with rule IDs such as `REFUND-02`, indexed by
+a root `SYSTEM_SPECS.md`. This check reads the rules that cover the change
+and reports each one the change breaks. It is not the refuter's spec check in
+Step 5. There, "spec" means feature spec, design and task text, read as
+evidence of intent. Both follow the same rule: text written with the change
+is not a decision.
+
+**First, does the repo have system specs?**
+
+```bash
+git ls-files -- ':(top)SYSTEM_SPECS.md' ':(top,glob)**/*.system-spec.md'
+git ls-tree -r --full-tree --name-only "$REV" | grep -E '^SYSTEM_SPECS\.md$|\.system-spec\.md$'
+```
+
+`$REV` is `HEAD`, or the commit's parent (`<sha>^`) when the change under
+check already landed, as on the hook's amend path. `:(top)` and
+`--full-tree` read from the repo root, whatever folder you are in;
+`git ls-tree` does not take `:(glob)`, hence the `grep`. The second command sees specs the
+change itself deletes: staging the removal of every spec empties the index,
+not the commit the rules come from. If both print nothing, skip the check.
+Do not hold the commit for it. The report carries one line, once per run:
+`system specs  none in this repo — run create-system-spec to set them up`.
+
+**Then, can you read the brief?** It lives in `maintain-system-spec`:
+[rule-check.md](../maintain-system-spec/rule-check.md). If that file cannot
+be read, skip the check with one line,
+`system specs  rule check skipped — install maintain-system-spec`, and do
+not hold the commit.
+
+**When it runs.** With iteration 1's finders, in the same message, whenever
+triage said `REVIEW`. On a triage `SKIP`, when the skip is a checkpoint, or
+when the diff edits or deletes a `*.system-spec.md` file. A checkpoint
+defers the hunt, not this check: a rule broken in a checkpoint is already in
+`HEAD` when the next commit is checked, so no later commit-time check would
+see it. A skip-category commit that edits only a spec is how a rule gets
+loosened ahead of the code that breaks it. In a later iteration, run it
+again with that iteration's finders only when its fixes touched a file a
+checked spec covers. Stage those fixes first: the check reads
+`git diff --cached`, and a fix left in the working tree would be committed
+without ever being checked.
+
+**Which specs.** Read each spec as committed at `HEAD`, never the working
+copy, which may carry edits made with this change. A spec is due when a
+Scope glob matches a staged file, when one of its rules cites a staged file,
+when the diff edits or deletes it, or when it has a `Scope: repo-wide` rule
+and a staged file is code (then check only those rules). The commands are in
+[rule-check.md](../maintain-system-spec/rule-check.md#which-specs-to-check),
+in one-change mode. No spec due: one report line,
+`system specs  no spec covers this change`, and no subagent.
+
+**Its own subagent.** One, beside the finders. Do not fold it into a
+finder's brief, and do not launch one per finder. It does not count against
+the cap of 4. Launch it like a finder: on Cursor, `Task`, `subagent_type:
+generalPurpose`, the `rule_check` role's slug ([Models by
+role](#models-by-role)), `run_in_background: true`. That list is Grok-first
+like the finders', because the check runs on every reviewed commit. The prompt is
+[the brief](../maintain-system-spec/rule-check.md#brief), slots filled. If it
+fails twice, run the brief yourself in-process and say so. A rule check that
+did not run is not a clean one. **No commit, mint or result block until the
+check has returned its breaks or `none`.** If it has not returned, wait. If
+it failed and the in-process run failed too, that is an open decision for
+the user, asked like a paused break: run it again, or commit without it. With no subagents, say
+**rule check in-process — subagents unavailable**. Which agent does each part
+of the check, here and at the pull request:
+[Who does what](../maintain-system-spec/rule-check.md#who-does-what).
+
+**A break is any of these:**
+
+- The change makes code do what a rule forbids, or stop doing what a rule
+  requires.
+- The change deletes or weakens a test, or other evidence, that a rule cites.
+- The change edits a rule in a spec file, so the change rewrites its own
+  rule.
+
+Behavior no rule covers yet is not a break. Do not pause a commit because
+something "could be documented".
+
+**Each break either continues or pauses.** This skill never edits a system
+spec and never decides what happens to a rule. A pull-request workflow skill,
+when one is installed, asks about each rule once at the pull request. None is
+included in this repository, and it is optional: without one, the person
+settles rule changes by running `maintain-system-spec` themselves, and the
+chart entries stay undecided until then.
+
+**Continue** — record it in the [rule-change chart](#the-rule-change-chart)
+and let the commit go ahead — when one of these holds:
+
+- **A change doc approved it.** A change doc is an OpenSpec change
+  (`openspec/changes/<name>/`: proposal, design, specs, tasks) or a spec-kit
+  feature (`specs/<feature>/spec.md`, plan, tasks). It approves a break only
+  when the text that records the decision is in `HEAD`, put there by a commit
+  this conversation did not make. A `SPEC` or `DOCS` commit made earlier in
+  this conversation does not count, whether you made it or the `commit` skill
+  did when it split the change. Splitting the doc into its own commit first is
+  the same change, in two commits. Text written with the change approves
+  nothing, because an agent can write both the code and the doc that
+  justifies it. When you cannot tell, it is not approved. Status:
+  `recorded`.
+- **The user already acknowledged it in this conversation**, in a reply to a
+  question that named the rule ID: this skill's own pause, a pull-request
+  workflow skill's rule question when one is installed, or the person's
+  answer in a hand run of `maintain-system-spec`. When this skill runs inside
+  another agent, a
+  brief that names the rule ID and the person's answer is that reply. Apply
+  this one yourself; the subagent cannot see the conversation, so its brief
+  lists the commits this conversation made, and it judges only change docs.
+  Your reading of an earlier request is not a reply. Status: `acknowledged`.
+
+An answer of *update the spec*, *keep the old behavior* or *skip for now* is
+the decision itself: the commit that carries it gets no new chart entry.
+Whoever asked the question — the workflow skill when installed, otherwise the
+person in their hand run — writes the decision into the existing entry, in
+that same commit. A skip puts the rule back to its text at the merge base, and the
+brief does not count that restore as a break.
+
+**Pause** on any other break. A bug fix should not break a rule, so a break
+nobody approved is the case that needs a person —
+[Step 9](#a-system-spec-rule-break-pauses-the-commit).
+
+### The rule-change chart
+
+A committed log beside the spec index, one file per branch:
+`system-spec-changes/<branch>.md`, the branch name made path-safe. Its path
+rule, entry format and lifecycle are in
+[rule-check.md](../maintain-system-spec/rule-check.md#the-rule-change-chart).
+Entries are never removed; a decision is written into each when the rule is
+settled (at the pull request by a workflow skill, or in a hand run).
+
+**Written before the mint, committed with the code.** For each break that
+continued, the main agent extends this branch's entry for that rule when
+the entry is undecided, or adds a new entry when there is none or the last
+one is decided. An extension adds a behavior as its own `- new:` line, and
+not one the entry already lists. Then it
+`git add`s the chart file with the rest of the change — after the user's
+answer to any pause, before prose's first call when prose is installed, and
+before `commit-with-trailer.sh` or `caller-result.sh`. The entry is then part
+of the staged tree, so the binding is minted over a tree that includes it,
+and the commit that carries the code carries its record. Nothing is staged
+after the mint, as always. Under *caller commits* the entry is staged too,
+and the caller commits it with the rest; the result block does not change. A
+run that does not commit — report-only, an abort, *stop and fix* — writes no
+entry.
+
+**A chart file is never a spec and never approval.** A commit that touches
+only `system-spec-changes/` is a docs change: triage skips it, and no rule
+check runs. An `acknowledged` status in the chart is not a reply in this
+conversation; a later run asks again.
 
 ## Steps 4–7 — Prove, Refute, Fix, Verify
 
@@ -551,16 +808,17 @@ sufficient. The red is the check, and it is empirical.
 **Step 5 — Refute.** A *separate* agent that has not seen the finder's reasoning
 tries to kill each proven bug — unreachable, guarded upstream, intentional, or
 asserting something the code never promised. Only survivors get fixed; refuted
-findings are dropped and their tests deleted. Use the **same Grok slug as
-the finders** — this is judgment, not mechanics, so do not tier it down the
-way Steps 2, 4 and 7 are. On Cursor, pass `model: grok-4.7-high-fast`. The
-same fallback as Step 3 applies when that slug is missing.
+findings are dropped and their tests deleted. Use the **`refuter` role's
+model** ([Models by role](#models-by-role)), including the rule that finders
+and refuters never all run on your model. Its default list puts accuracy
+ahead of cost: a refuter runs only on proven bugs, and its verdict decides
+which of them get fixed.
 
 **Refuters run concurrently.** Each one judges its own finding and must not see
 the others' reasoning, so there is nothing to serialize — **launch them all in
 one message**, not one per bug after the last returns. Same launch as the
 finders: on Cursor, one `Task` per proven finding, `subagent_type:
-generalPurpose`, `model: grok-4.7-high-fast`, `run_in_background: true`.
+generalPurpose`, `model:` the refuter slug, `run_in_background: true`.
 The cap of 4 is the find, not a
 license to drop refuters; this count is the number of proven bugs. A Cursor
 subagent does not see this conversation, so each prompt is the Step 5 brief in
@@ -601,9 +859,9 @@ id. On Claude Code it is `SendMessage`. Pass the surviving findings, the
 refuter verdicts, and Step 5's fix-conflict notes. If those notes put two
 fixes in the same file, one of those finders writes both and the other does
 not write. The parent does not re-read the source to invent the fix. Spawn a
-fresh agent on the **same Grok slug as Step 3** (`grok-4.7-high-fast` on
-Cursor) only if that finder is no longer reachable. Do not pass `model` on
-a resume — the finder already runs on that slug. The mechanics are in
+fresh agent on the **slug Step 3 passed its finders** only if that finder is
+no longer reachable. Do not pass `model` on a resume — the finder already
+runs on that slug. The mechanics are in
 [reference.md](reference.md#step-6--fix).
 
 **Read the codebase's record of rejected approaches first, if it keeps one** —
@@ -629,12 +887,19 @@ green.** If a pre-existing test now fails, the fix broke it — fix the fix, or
 revert it and report it unresolved. Running tests and comparing counts to the
 baseline — a **small, cheap model** is sufficient.
 
+**Then stage what this iteration wrote**: every fix and every kept
+regression test, by path (`git add <paths>`, never `-A`). The next
+iteration's finders read the staged tree, and a fix left in the working tree
+is invisible to them — and is the Step 0 divergence that stops a run.
+
 ## Step 8 — Iterate
 
 **A run and an iteration are different things, and the counter resets.**
 
 - An **iteration** is one Step 3 → Step 7 pass over the current state of the
-  change, including the fixes just written.
+  change, including the fixes just written. In a light run, iterations 2 and
+  3 read the fixes' delta rather than the whole change ([The delta
+  pass](#the-delta-pass)).
 - A **run** is up to three iterations. It ends when an iteration comes back
   clean, or at the abort — three iterations that each found something, followed
   by the root-causes report and one decision per cause (Step 9), **never a
@@ -662,6 +927,69 @@ previous pass missed them. Is the finding approach looking in the wrong place? I
 the code's design the reason bugs keep appearing here? Rethink the approach, then
 continue. If the answer is a design change larger than the change under review,
 take it to Step 9 as a root cause and let the user decide.
+
+### The delta pass
+
+**In a light run, iterations 2 and 3 read only what the last fixes changed.**
+Iteration 1 reads the whole change. A heavy run never uses a delta.
+
+At the start of every iteration's Step 3, after Step 7 staged the last
+iteration's work, record the staged tree:
+
+```bash
+git write-tree        # T1 at iteration 1, T2 at iteration 2, T3 at iteration 3
+```
+
+The delta for iteration k is the change from the tree the last pass read to
+this one, on reviewable files:
+
+```bash
+git diff -M --numstat <T(k-1)> <Tk> -- ':(top)' ':(top,exclude)system-spec-changes/**'
+git diff -M <T(k-1)> <Tk> -- ':(top)<reviewable path>' ...
+```
+
+The numstat prints paths from the repository root, so each one goes back in
+as `':(top)<path>'`; from a subfolder, a plain path would name the wrong
+file, and a plain `.` would hide every fix outside that folder.
+
+- **Size it with the same table** ([Light or heavy](#light-or-heavy)), on
+  the delta's changed lines, counted the same way.
+- **An empty delta ends the run clean.** The last iteration fixed nothing,
+  so the code is exactly what a full pass just read. Its settled findings
+  are in the report.
+- **Each delta finder gets, after the template**: the whole change for its
+  files, for context (`git diff --cached -- <paths>`), and the findings the
+  last iteration fixed — scenario, test, and what the fix changed — so it
+  checks that each fix closes its bug without opening a neighbour. It still
+  reads each touched file in full.
+- **A delta finder may report a bug anywhere in the files it reads.** When a
+  survivor of a delta pass sits outside the delta's lines, the next
+  iteration is a full pass over the whole change, sized by the whole change:
+  the first pass missed something, and the delta cannot be trusted to show
+  the rest. On iteration 3 there is no next iteration and none is asked
+  for: fix the survivor as usual, and the run's `budget` root cause (below)
+  covers the whole change, not only iteration 3's fixes.
+
+The budget does not change. Iteration 3's fixes still never get a pass of
+their own, and that remainder is still a root cause (below). Why a light run
+reads less:
+[DECISIONS.md](DECISIONS.md#light-passes-after-the-first-read-only-the-fixes-delta).
+
+### The settled list
+
+**A candidate is hunted once.** Keep one list per run, in both modes, of
+every candidate already settled: dropped at Step 4 because its test passed,
+refuted at Step 5, or reported-not-fixed because no test can show it. Each
+entry keeps the tree its iteration recorded at Step 3, the code it was
+settled against. Give the list to every later finder after the template, one
+line each — `file:line — scenario — how it was settled — tree <T>` — with:
+*do not report these again unless `git diff <T> <current tree> --
+':(top)<file>'` changes their lines.* That is the only test. A full pass
+reads `git diff --cached`, which shows every line of the change, settled or
+not; that diff does not reopen anything. A settled candidate appears in the
+report once, in the iteration that settled it. Reported again with its lines
+unchanged since it was settled, it is not a new finding, and it does not
+keep the run going.
 
 ### The abort is an ending, not a request for more budget
 
@@ -718,10 +1046,14 @@ is in [reference.md](reference.md#the-report). Read it before writing one.** The
 commit itself — what to stage, the trailer, splitting — is in
 [reference.md](reference.md#committing).
 
+**No commit, mint or result block while a paused system-spec rule break
+waits for the user's answer.** See [below](#a-system-spec-rule-break-pauses-the-commit).
+
 **Commit through the script. Never assemble `git commit -m … --trailer …` by
 hand — not for a fix, not for a skip, not for a one-line docs change.** Scope:
 first letter capital when inventing; reuse `git log` tokens as-is. Stage
-everything first, then, standing in the project:
+everything first — this branch's [rule-change chart](#the-rule-change-chart)
+entries included — then, standing in the project:
 
 ```bash
 BH=~/.agents/skills/bug-hunter/scripts/commit-with-trailer.sh
@@ -731,7 +1063,8 @@ BH=~/.agents/skills/bug-hunter/scripts/commit-with-trailer.sh
 ```
 
 Four arguments: subject, body (`""` if none — never a trailer in it), the
-`Bug-hunter:` value, and optionally the `Co-Authored-By` value. Each trailer is
+`Bug-hunter:` value — ending `, heavy` for a heavy run, as in `2 iterations,
+3 bugs fixed, heavy`; a light run adds nothing — and optionally the `Co-Authored-By` value. Each trailer is
 passed as `--trailer`, so where it lands is git's problem; and for any value that
 is not `skipped …` the script runs `mint-trailer.sh` against the tree staged at
 that instant and adds the `Bug-hunter-Tree` binding — the one line a hand-typed
@@ -808,6 +1141,51 @@ Keep no-op output proportional — the expensive thing is never a short line
 saying nothing happened, it is a long report demanding work that does not need
 doing.
 
+### A system-spec rule break pauses the commit
+
+**A break no change doc approved, and the user has not acknowledged, waits
+for the user.** Do not run `commit-with-trailer.sh`, `mint-trailer.sh` or
+`caller-result.sh` until the user has answered every paused break. A minted
+binding says this tree is done, and it is not done while a break nobody
+wanted might be a bug.
+
+The hunt still runs to its end. A break does not stop the iterations and
+does not earn an interim report. It goes in the Step 9 report, above the
+root causes, one entry per break: spec path, rule ID, the rule quoted as
+committed at `HEAD`, what the change does to it, and the `file:line` ranges.
+Each paused break counts in the headline's `N to decide`. Ask each one
+through the picker, one question per break, with exactly two options:
+
+1. **continue** — the break is intentional. Record it in the chart as
+   `acknowledged`, then commit as usual.
+2. **stop and fix** — no commit. Unless the user says they will fix it,
+   resume the rule-check subagent that found the break, with the
+   [fix brief](../maintain-system-spec/rule-check.md#fix-brief) and "return;
+   do not commit". It already read the rule, the diff and the break, the way
+   Step 6 resumes a finder. Spawn a fresh one, on the `rule_check` role's
+   slug, only if it cannot be resumed. Stage what it changed. Then the hunt runs again on the
+   fixed diff: a new run at iteration 1, started without asking again, as
+   with *fix it now*.
+
+Neither answer edits a spec or settles the rule. *Continue* says only that
+the break was meant. Whether the spec changes or the code goes back is
+decided once, later: at the pull request by a workflow skill when one is
+installed, otherwise when the person runs `maintain-system-spec`.
+
+**Under *caller commits*, a pending pause means no result block.** Do not
+run `caller-result.sh`. End with the report. A caller that finds no block
+has nothing to commit with; it holds the commit and takes the breaks to a
+person. A later run, whose brief carries the person's answer for each rule
+ID, applies them and prints the block.
+
+**Every break that continued goes in the chart**, with its status —
+`recorded` with the change doc and the commit that put the approving text
+there, or `acknowledged` — staged before the mint and committed with the
+code ([The rule-change chart](#the-rule-change-chart)). The report shows the
+same entries ([reference.md](reference.md#in-the-report)). Why a committed
+log, one file per branch:
+[DECISIONS.md](DECISIONS.md#rule-changes-go-to-a-committed-log-one-file-per-branch).
+
 ### Write down what was rejected, before you commit
 
 A run that reverted a fix, refuted a finding, or chose one approach over another
@@ -862,7 +1240,8 @@ That test is checkable; "it felt unrelated" is not.
 **If the brief says "caller commits", the run is the same; only the commit
 moves.** A caller that builds its own commits — through an API, in a pipeline,
 anywhere this skill does not run `git commit` — says so in the brief:
-*caller commits: return the result, do not commit.* Steps 0–8 run as written,
+*caller commits: return the result, do not commit.* A brief that also says
+`mode: heavy` makes the run heavy ([Light or heavy](#light-or-heavy)). Steps 0–8 run as written,
 and every rule under *Do not evade this skill* still applies. Step 9 ends
 differently:
 
@@ -982,5 +1361,9 @@ no options under it, is the same thing one hop later.
 - Apply a refactor larger than the change under review.
 - Write to this skill's own files — `DECISIONS.md` included — unless they are
   the change under review.
+- Commit, mint, or print the result block while a paused system-spec rule
+  break waits for the user's answer.
+- Edit a system spec, or decide what happens to a rule. That is the pull
+  request's, once.
 - End a reply holding a decision from the user's list. Written is not asked;
   relayed to you is not relayed to them.

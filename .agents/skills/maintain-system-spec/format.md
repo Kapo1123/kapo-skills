@@ -127,6 +127,45 @@ privacy is a rule, with the same fields:
   no citation has `Evidence: (inferred)`. An inferred rule is a claim to
   check, never a rule. Reviewers and other skills do not hold a change to it.
 
+### Open changes
+
+A rule can carry one more field, last:
+
+```markdown
+- **SESSION-02.** A request without a session ID is never sent.
+  - Enforced by: unenforced
+  - Evidence: `src/api/client.ts:120`
+  - Open change: dev/someone/guest-requests, 2026-10-26 — guest requests are sent without a session ID
+```
+
+- **Form:** `Open change: <branch>, <YYYY-MM-DD> — <the new behavior, one
+  sentence>`. The branch is the one whose pull request left the rule open.
+  One per branch: a rule two pull requests skipped carries two lines, oldest
+  first. A second skip on the same branch replaces that branch's line, so it
+  names the newest behavior.
+- **What it says:** the code and this rule disagree, and the person has not
+  decided which gives way. The rule above it is unchanged and still the
+  rule. It is not a rule edit, and it is not approval.
+- **Who writes it:** a pull-request workflow skill, when one is installed
+  and the person answers *skip for now* for that rule. None is included in
+  this repository; without one, the person adds it in a hand run of
+  `maintain-system-spec`, and only when they choose to record a skip. It is
+  committed on that branch, so it survives the merge.
+- **Who clears it:** updating the rule removes its lines in the same edit.
+  When the code is changed back instead, an on-demand `maintain-system-spec`
+  run removes them once a check with full coverage finds the whole rule
+  holds. A branch-mode check, or one with partial coverage, reads only part
+  of the code, so its `holds` leaves them. A fix commit leaves them too,
+  because the code that broke the rule may reach beyond that fix.
+- **The chart records the same skip, as history.** The chart entry says
+  when the rule was skipped and why; this line says, next to the rule, that
+  it is still open. This skill reads the line, not the chart.
+- **It is the one note about pending work a spec may carry.** The ban on
+  `TEMPORARY` notes and plans below is about text that describes what is not
+  true yet. An open change describes what is true now: the code does not keep
+  the rule. `maintain-system-spec` lists every one at the top of each report
+  until none remain.
+
 **Retired:** when a rule is removed, its ID goes on the `Retired:` line at the
 end of its section, so no one reuses it. Only the ID: no reason, no date.
 
@@ -148,7 +187,7 @@ suggests how. `unenforced` rules are where maintain spends its effort.
 | Function signatures, class or endpoint lists, config copies | They are already in the code and go stale the day it changes |
 | Generic principles ("Fail Secure", "Single Responsibility") | They are not checkable against this code |
 | Ticket, PR, or change history | Git has it |
-| `TEMPORARY` notes, status tables, future plans | They describe what is not true yet |
+| `TEMPORARY` notes, status tables, future plans | They describe what is not true yet. An `Open change:` line is not one of these; see [Open changes](#open-changes) |
 | `Version` or `Last updated` headers | They drift from git; the master records the last verified commit |
 
 An endpoint belongs in Contracts only as a rule others rely on, such as "returns
@@ -196,6 +235,26 @@ Larger source folders with no spec.
   default branch. `—` before the first one.
 - **Uncovered:** larger source folders with no spec. A folder leaves the list
   when a spec covers it.
+
+## The rule-change chart
+
+`system-spec-changes/` at the repo root, beside `SYSTEM_SPECS.md`, holds a
+committed log of rule changes: one Markdown file per branch, named after the
+branch with each `/` turned into `--` and any other character outside
+`A-Z a-z 0-9 . _ -` turned into `-`, then `-` and the first 8 characters of
+the branch name's git hash, so two branches never share a file
+([rule-check.md](rule-check.md#the-rule-change-chart) has the command).
+`bug-hunter` adds an entry, in the same
+commit as the code, for each rule change it lets through. A pull-request
+workflow skill, when installed, writes each decision into it at the pull
+request; without one, entries stay undecided until the person settles them
+in a hand run. Entries are never removed.
+The entry format and lifecycle are in
+[rule-check.md](rule-check.md#the-rule-change-chart).
+
+The chart is not a spec. Nothing under it is a rule, nothing reads it as
+approval, and edits to it are never a spec edit. This skill may read it for
+context, such as when and why a rule changed, and never edits it.
 
 ## Links from rule files
 

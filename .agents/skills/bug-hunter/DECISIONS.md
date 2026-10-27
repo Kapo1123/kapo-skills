@@ -15,6 +15,12 @@ Some entries name `prose` and `commit`. Those skills are not in this
 repository; they live in the team skills repo this copy came from. Every rule
 that involves them applies only when they are installed.
 
+This copy also omits the pull-request workflow skill (`open-pr-workflow` in
+the team repo) that asks about each rule change and writes chart decisions.
+It is optional. Until one is added, rule changes are settled by hand: the
+person runs `maintain-system-spec`, and chart entries stay undecided until
+then. Entries below that name it describe that skill when it is installed.
+
 **The hook and mint mechanics are shared** with other skills, and their
 decisions live with them, in
 [`.agents/lib/commit-trailer/DECISIONS.md`](../../lib/commit-trailer/DECISIONS.md):
@@ -483,7 +489,7 @@ slice finder that still has a survivor when the find was split (see *The find
 runs in parallel slices*) — passing the surviving findings, the refuter
 verdicts, and Step 5's fix-conflict notes. On Cursor the resume is the Task
 tool's `resume`; on Claude Code it is `SendMessage`. A fresh agent call —
-the same Grok slug as the find, full brief — is the fallback, used only when that
+the slug the find ran on, full brief — is the fallback, used only when that
 finder is no longer reachable (errored, session ended, or it belongs to an
 earlier iteration).
 
@@ -530,9 +536,10 @@ the same file.
 
 **Decision.** The parent scopes the staged diff, launches the finders
 together, and merges their lists. It does not hunt, and it does not re-read
-the files those finders read. A small diff stays on one agent. Anything else
-is at most four finders, split by area when the diff spans areas, or by bug
-class when it is one area and more than one class can fire. Never both.
+the files those finders read. How many finders comes from the changed-line
+count (*Light by default, heavy on request*), at most four. Two or four
+split by area when the change has at least as many areas as finders, and by
+bug class otherwise. Never both.
 Cursor launches them as `Task` subagents, `subagent_type: generalPurpose`,
 `run_in_background: true`, all in one message. Each prompt is the Step 3
 template, filled in, because a Cursor subagent cannot see the parent
@@ -548,14 +555,15 @@ slowness is the single agent, and the fix is parallel independent work, not
 a thinner hunt.
 
 **Rejected.**
-- **Skipping a step, or a cheaper model than the pinned Grok, to go faster.**
+- **Skipping a step, or a cheaper model than the role's, to go faster.**
   The contract is unchanged: reachability, an observed command, a red test, a
   separate refuter, the suite. A faster run that files guesses is a different
-  skill. Which model the find and the refute use is the next decision, and an
-  agent does not get to reopen it by calling Grok cheaper than Fable.
+  skill. Which model each step uses is the next decision, and an agent does
+  not get to reopen it by skipping down a role's list.
 - **One finder per file, or area slices that are then split by class.** That
   is dozens of agents on a short diff, and it cuts a caller off the code it
-  calls. The cap is 4. Under 40 changed lines in total is always one finder.
+  calls. The cap is 4. Up to 50 changed lines is always one finder in a
+  light run (*Light by default, heavy on request*).
 - **The parent re-reading each slice "to be sure".** That puts the serial
   read back in front of the parallel one. Merge is a union and a dedupe
   (same file, same wrong outcome). Disagreement is not a refutation; Step 5
@@ -573,40 +581,208 @@ one per proven finding, launched together, and the cap of 4 does not drop
 any of them. A host that cannot nest subagents runs one in-process find and
 says so — that is the same hunt, not a skip.
 
-## Find, refute, and the fix fallback use the best Grok
+## Light passes after the first read only the fixes' delta
 
-**Decision.** Step 3 finders, Step 5 refuters, and a Step 6 fixer spawned
-because the finder cannot be resumed all use the best Grok model. On Cursor
-that slug is `grok-4.7-high-fast`, passed as the Task `model`. If that slug
-is absent, use the listed Grok slug with the highest version, and when
-several share that version the one whose name includes `high`, and say which.
-If the host lists no Grok model, omit `model` and say so. A resume does not
-pass `model`; the finder was already started on that slug.
+**Decision.** In a light run, iteration 1 reads the whole staged change.
+Iterations 2 and 3 read the delta: `git diff -M` between the tree the last
+pass read and the tree staged now, both recorded with `git write-tree`, plus
+each touched file in full, the whole change for those files as context, and
+the findings the last fixes closed. An empty delta ends the run clean. A
+delta-pass survivor outside the delta's lines makes the next iteration a
+full pass; on iteration 3, which has no next pass, the `budget` root cause
+covers the whole change instead. A heavy run re-reads the whole change every
+iteration. In both modes a settled list — candidates dropped as unproven,
+refuted, or reported because no test can show them — goes to every later
+finder, which does not report them again unless their lines changed since
+the tree they were settled against. Step 7 now ends by
+staging the iteration's fixes and tests, so the next pass can see them.
 
-Steps 1, 2, 4 and 7 stay on a small, cheap model. They translate or compare
-a result the run already has.
+**Why.** A second full read of an unchanged change is the most expensive
+part of a run that found something, and most of what it reads is code a
+finder just read. The bugs a later pass exists for are in the fixes (*An
+iteration that fixed something is never the last one*), and the delta is
+exactly the fixes. The settled list stops a loop: the same untestable
+candidate reported every iteration, keeping the run going with
+nothing to fix. The staging step was missing before this change: iteration
+2's finder reads `git diff --cached`, so a fix left in the working tree was
+invisible to it.
 
-**Why.** On 2026-10-15 Harsh reported that the skill always picked the model
+**Accepted cost, said plainly.** The measurement in *An iteration that fixed
+something is never the last one* is iteration 2 finding 7 bugs, only two of
+them created by iteration 1's fixes. The other five were misses in the
+original code, and a delta pass is less likely to find those. Three things
+bound the loss: the first pass is sized to the change, the delta finder
+reads every touched file in full and may report anything in them, and a
+survivor outside the delta sends the next pass back to a full read. A user
+who wants the second full read asks for heavy.
+
+**Rejected.**
+- Re-reading the whole change on every light pass, as before. That is heavy
+  mode, now on request.
+- Reading the delta hunks alone, without the files. A fix's bug is usually in
+  how it meets the code around it, the reason every finder reads whole files.
+- Deriving the delta from the working tree. Step 4's tests and unstaged edits
+  would pass for fixes; the staged trees are what the commit will contain.
+- Reopening a settled candidate when the pass's own diff shows its lines. A
+  full pass reads `git diff --cached`, which shows every line of the change,
+  so every settled candidate would reopen on the first full re-read. The test
+  is whether the lines changed since the tree it was settled against.
+- A fourth iteration when iteration 3's delta finds a survivor outside it.
+  There is no fourth iteration (*There is no fourth iteration; the abort
+  reports root causes*); the whole change goes to the user as a `budget`
+  cause instead.
+- `.` pathspecs on the delta. From a subfolder they hide every fix outside
+  it, and an empty delta ends the run clean.
+
+**Where this stops applying.** The anti-evasion rules are about whether a
+pass runs, and a delta pass still runs after every fix — rule 2's "code
+written since the last clean pass" is the delta. It does not change the
+budget: iteration 3's fixes are still a `budget` root cause. Heavy is not
+affected.
+
+## Light by default, heavy on request; the finder count follows size
+
+**Decision.** A run is light unless the user asks for a heavy hunt in the
+conversation, or a caller's brief says `mode: heavy`. The finder count comes
+from the reviewable changed lines, counted with `git diff --cached -M
+--numstat` over `:(top)` pathspecs, the rule-change chart excluded: 1 finder
+up to 50 lines, 2 up to 300, 4 above. A plain `.` would count only the
+folder the agent stands in. A heavy run uses 4 on every iteration, on the `finder_heavy`
+model. Two or four finders split by area when there are enough areas, and by
+bug class otherwise, never both. Only a heavy run says so in the trailer,
+as `, heavy` at the end of the value.
+
+**Why.** The old sizing rule had two branches and four conditions (under 40
+lines; or one area, at most 3 files, under 150 lines and one class), and
+past them the count came from how many areas or classes the agent could
+name, so the same diff could get one finder or four. A count from git is the
+same every time and can be checked from the report's `scope` line. The steps
+— 50 and 300 — keep a typical small commit on one agent and give a large one
+the full four. Heavy exists for the change the user is worried about: they
+pay for four readers and a stronger finder model on purpose, so the agent
+neither picks it for them nor drops it to save time.
+
+**Rejected.**
+- The agent choosing heavy when the change "looks risky". Cost is the user's
+  call, and a mode an agent can raise is a mode it can lower.
+- Recording `light` in every trailer. Light is the default, so every old
+  value already means light, and a new word on every commit adds noise.
+- The finder count in the trailer. The hook does not check counts, and the
+  report already has them.
+- Excluding files from the count without naming them. An agent that wants
+  one finder can drop files to get under 50; naming them in `scope` is what
+  makes that visible.
+
+**Where this stops applying.** The count picks how many finders read, not
+whether the hunt runs: a one-line change still gets the full hunt from one
+finder (*Every anti-evasion rule was added after it was walked through*).
+
+**Follow-ups, not built.**
+- *Heavy by default for risky paths*, from a path list in the same config
+  key. It needs a list someone maintains and a rule for when a path counts.
+- *Callers forward heavy.* The `commit` and pull-request workflow skills,
+  where installed, run this skill for the user; when the user said "heavy", their brief should
+  carry `mode: heavy`. One line in each, outside this skill.
+
+## Models by role, from settings
+
+**Decision.** Each subagent runs on its role's model: `triage`,
+`finder_light`, `refuter`, `rule_check`, `mechanical`. `scripts/models.py`
+holds one ordered list per role and prints it. The agent passes the first
+entry the host lists: an exact slug, a family word (its highest version,
+`high` then `thinking` on a tie), or `inherit`, which ends every list. A
+person overrides a role in the kapo-skills config file, under the
+`bug-hunter` key. A resume does not pass `model`; the finder was already
+started on its slug. A launch that fails moves to the next entry that
+resolves to a different slug: `grok-4.7-high-fast` then `grok` is the same
+model on a host that lists it, and retrying it would spend the retry on the
+slug that just failed.
+
+The defaults: finders and triage on Grok first (`grok-4.7-high-fast`, then
+any Grok). Refuters on Sonnet, then Opus. The rule check on Grok, then
+Sonnet. Mechanical work on Grok, then Haiku. Steps 4 and 7 stay in the
+parent loop, as before.
+
+**Why the finders stay on Grok, and nothing defaults to the heaviest
+model.** On 2026-10-15 Harsh reported that the skill always picked the model
 with the most weights. That was Fable, and a run through it was slow and
 burned the budget fast enough that people stopped running the skill. The
-instruction those agents were obeying is the old one: "strongest available
-model", with "omit `model` only when you cannot tell which slug is
-strongest". Read as written, that is Fable whenever Fable is listed. Grok
-4.7 is the model the team wants here: strong enough for the hunt, and cheap
-and fast enough that the skill still gets run.
+instruction those agents were obeying was "strongest available model", with
+"omit `model` only when you cannot tell which slug is strongest". Read as
+written, that is Fable whenever Fable is listed. Grok 4.7 is the model the
+team wants for the find: strong enough for the hunt, and cheap and fast
+enough that the skill still gets run.
+No list puts the heaviest model first, and a list can only be walked down,
+never skipped past.
 
-**Rejected.** Leaving "strongest available" in place and trusting the agent
-to notice the cost. That sentence is what selected Fable. Also rejected:
-pinning Grok only on the find and leaving refute as "a capable model". One
-refuter per proven bug, each free to pick Fable, puts the same cost back on
-the step that runs after the expensive one. Also rejected: moving prove and
-verify onto Grok. Those steps are cheap on purpose, and the red test is the
-check.
+**Why the refuter moved off Grok.** The refuter decides which proven bugs get
+fixed and which get dropped, so its accuracy matters most of any judgment in
+the run. It also runs only on proven bugs, a handful per run at most, so a
+more careful model there costs little next to the find. The earlier version
+of this entry pinned the refuter to Grok, rejecting "a capable model" because
+each refuter, free to pick, would pick Fable. A fixed list answers that
+worry: Sonnet first, Opus only when Sonnet is missing, never "whatever is
+strongest".
+
+**Why a setting, and why there.** A team without Grok, or with another
+host's slugs, has to be able to run the skill without editing `SKILL.md`.
+The defaults live in one script, so `SKILL.md` never repeats a slug and the
+two cannot drift. A team changes them in its clone; one person overrides a
+role in `~/.config/kapo-skills/config.json`, the file `manage-skills`
+already keeps, which preserves keys it does not own. A damaged config warns
+and falls back to the defaults; it never blocks a hunt.
+
+**Rejected.**
+- Leaving "strongest available" in place and trusting the agent to notice the
+  cost. That sentence is what selected Fable.
+- A per-repo config file. The code under review would choose its own
+  reviewer: the single input supplied by the party being checked, which is
+  the objection in *The hook is never told that a run is in progress*.
+- An environment variable as the setting. Agent shells do not reliably
+  inherit one, and nobody can read it back from the report.
+- Moving prove and verify onto a subagent model. Those steps are cheap on
+  purpose, and the red test is the check.
+- Repeating the default slugs in `SKILL.md`. Two copies drift.
 
 **Where this stops applying.** An agent that is itself the finder, because
 the host has no subagents, cannot switch its own model. It says so and runs
-the hunt. This pin is not a reason to skip a step, drop a refuter, or pick
-an older Grok to finish sooner — that rejection is in the entry above.
+the hunt. A role's list is not a reason to skip a step, drop a refuter, or
+pick an entry further down to finish sooner — that rejection is in the entry
+above.
+
+## Finders and refuters never all run on the main agent's model
+
+**Decision.** When the finder role and the refuter role would both resolve to
+the model the main agent runs on, the refuters move to the next entry in the
+`refuter` list that is a different model. If none is, the report says so.
+"The main agent's model" is the slug the host runs it on, and `inherit`
+counts as that slug. It is not the `Co-Authored-By` value, which is a display
+name such as `Cursor <cursoragent@cursor.com>` and never matches a slug.
+
+**Why.** The main agent usually wrote the change under review. A model is
+likelier to miss a bug it wrote, for the same reason it wrote it, and the
+refuter, defaulting to skepticism about findings, is likelier to wave one
+away as intended. The default lists already keep finders on Grok and
+refuters on Sonnet, so this rule rarely fires with them. It guards the setup
+where every role falls back to one model: a host with no Grok and no Opus, or
+a config that lists the same slug everywhere, where `inherit` would put the
+whole run on the author's model. This rule is new; the Grok pin above was
+about cost and speed, never about independence.
+
+**Rejected.** Requiring every role to differ from the main agent's model. On
+a host with two models that cannot be met, and triage and mechanical work
+are not judgments about the author's code.
+
+**Where this stops applying.** In-process, when the host has no subagents,
+there is only one model; the report says so. Independence in the sense of
+*Step 6 resumes the finder* — a refuter that has not seen the finder's
+reasoning — is a separate rule and does not change.
+
+**Follow-up, not built.** A stricter form: the refuter always differs from
+the main agent's model when its list allows, not only when the finders also
+match. The refuter judges the author's code, so it is the step where shared
+blind spots matter most. Deferred until a run shows the looser rule letting
+a bug through.
 
 ## Triage applies to the hook's own reports
 
@@ -1007,3 +1183,266 @@ it lands in a commit that is not a checkpoint.
   learn to write, and a repository with a different one gets wrong skips or
   reviews it can't explain. The hint added nothing the diff didn't already
   decide.
+
+---
+
+## A system-spec rule break continues or pauses; the pull request decides
+
+**Decision.** In a repo with system specs (`SYSTEM_SPECS.md` or any tracked
+`*.system-spec.md`), a separate system-spec rule check reads the rules that
+cover the change, as committed at `HEAD`, and reports each break: code that
+does what a rule forbids or stops doing what it requires, a cited test or
+other evidence removed or weakened, or a rule edited in its own spec file.
+Each break has one of two outcomes at commit time:
+
+- **Continue**, when a change doc committed before the code approved it
+  (in `HEAD`, by a commit this conversation did not make), or when the user
+  already acknowledged it in this conversation, in a reply to a question that
+  named the rule ID. It goes in the rule-change chart and the commit
+  proceeds.
+- **Pause**, for any other break. The user answers *continue* (intentional;
+  recorded as `acknowledged`) or *stop and fix* (no commit; the code is
+  fixed and a new run checks it). Until then, no commit, no mint, no result
+  block.
+
+Commit time never edits a spec and never decides a rule's outcome. A
+pull-request workflow skill, when installed, asks once per rule at the pull
+request: update the spec, keep the old behavior, or skip for now. Without
+one, the person settles each rule in a hand run of `maintain-system-spec`. The check runs in its own subagent
+beside the finders, on checkpoints too, and on any skip that edits a spec.
+In a repo with no system specs it is skipped with one line that points at
+`create-system-spec`; without `maintain-system-spec`, which holds the brief,
+with one line that says to install it.
+
+**Why.** A system spec says what must stay true, and a change that breaks a
+rule is either a bug or a decision. Only the user knows which. The hunt
+cannot tell: a red test proves the code does something, not that the
+something was unwanted. Most commits are bug fixes, and a bug fix should not
+break a rule, so an unexplained break is worth one question. Whether the
+rule or the code should give way is a larger question, and it belongs where
+the code and the spec can land together — the pull request. Asking it at
+every commit would ask it again for each commit that touches the same rule,
+and the user wants one approval per rule, not one per commit.
+
+The approval rule is the refuter's rule applied to a new question.
+*Documentation written in the same session is not evidence of intent* found
+an agent's own fresh design text quoted back as the reason a finding was
+wrong. Here the same text would be quoted back as the reason a rule could
+break. An agent can write both the code and the doc that justifies it, so
+only text that existed before the code says a person wanted the change.
+
+Holding the mint is what makes the pause real. The binding is the one thing
+here an agent cannot produce from memory, and every commit path in this
+skill goes through a script that mints it. A rule that said "ask first" with
+the mint still available would be advice.
+
+**Closed on purpose, because each is a way around the pause:**
+- **A triage skip still runs the check when the diff edits a spec.** A
+  spec-only commit is a docs skip, and it would let a rule be loosened in one
+  commit and broken in the next, with the second commit reading the already
+  loosened rule. The same goes for the hook-report amend of a skip-category
+  commit.
+- **A checkpoint runs the check.** The hunt on a checkpoint is deferred to
+  the next commit that is not one. The rule check cannot be deferred that
+  way: the next commit reads its rules at `HEAD` and diffs against it, so a
+  break that landed in a checkpoint is invisible to every later commit-time
+  check. The hunt's checkpoint rule is unchanged.
+- **A `SPEC` or `DOCS` commit made earlier in this conversation does not
+  approve.** The `commit` skill puts spec and doc slices first, so a change
+  doc written with the code would otherwise be "committed before the code"
+  by the time the code slice runs.
+- **Rules are read as committed, never from the working copy.** Editing the
+  spec in the working tree changes nothing the check reads; it shows up as a
+  rule edited.
+
+**Rejected.**
+- **A per-rule decision at commit time** — update the spec, keep the old
+  behavior, or accept the new behavior, with no mint until each was picked.
+  This was the first draft. It decided the rule's outcome commit by commit,
+  had the skill edit specs, and asked the same question again at the pull
+  request, where the code and spec edits have to land together anyway. Two
+  outcomes at commit time, and one decision per rule at the pull request,
+  ask each thing once.
+- **Treating a broken rule as an ordinary bug the hunter fixes.** A finding
+  is fixed without asking because the code was meant to do otherwise. A rule
+  break may be the change the user asked for, and fixing it would revert
+  their feature.
+- **Letting the hunter edit the spec to match.** That turns a bug into a rule,
+  and the next agent then protects the bug — the reason
+  `maintain-system-spec` never rewrites a rule to match code that breaks it.
+- **Folding the check into each finder.** A finder hunts one slice or one bug
+  class; a rule covers whatever files it covers, across slices. Every finder
+  would read the same specs, and no finder would own the answer. One subagent
+  reads the specs once, and the finder template stays byte-stable.
+- **Counting spec or change-doc text written with the change as approval.**
+  It is the change restating itself, as above.
+- **Blocking commits in repos with no system specs.** The check is useful
+  only where rules are written down. Blocking there would make the skill a
+  gate on a format most repos have not adopted.
+- **Stopping the hunt the moment a break is found.** That is the interim
+  report and the check-in between iterations that *Every anti-evasion rule
+  was added after it was walked through* removed. The pause waits in the
+  Step 9 report with every other decision.
+- **Counting the agent's reading of the conversation as acknowledgement.**
+  "They asked for this" is a paraphrase made by the party being checked. A
+  question that names the rule ID costs the user one answer and leaves no
+  doubt.
+
+**Where this stops applying.** Behavior no rule covers is not a break, and a
+commit is never paused because something could be documented. A rule marked
+`Evidence: (inferred)` is a claim, not a rule, as `maintain-system-spec`'s
+format says, so breaking one is a note. Nothing verifies the check ran: the
+binding attests to the tree, as it does for the find and refute passes. And
+the "not made in this conversation" test rests on the agent listing its own
+commits honestly. A doc committed in an earlier session by the same agent
+passes it. That is accepted: the pull request still asks the user about
+every rule change.
+
+## Rule changes go to a committed log, one file per branch
+
+**Decision.** Every break that continued gets an entry in
+`system-spec-changes/<branch>.md`, beside `SYSTEM_SPECS.md`, the branch
+name made path-safe (`/` to `--`, anything else outside `A-Za-z0-9._-` to
+`-`) plus 8 characters of its git hash: rule ID, spec path, branch, the old rule quoted, the new behavior, the
+lines, and the status (`recorded` with its change doc, or `acknowledged`).
+The main agent writes it and stages it before the mint, so it lands in the
+same commit as the code. A pull-request workflow skill, when installed,
+reads this branch's entries, merges them with a fresh branch re-check, asks
+once per rule, and writes the decision into each entry, in the same commit
+as the decision's effect. Without one, entries stay undecided until the
+person settles them in a hand run.
+Entries are never removed. The format and lifecycle are defined once, in
+[`maintain-system-spec/rule-check.md`](../maintain-system-spec/rule-check.md#the-rule-change-chart).
+
+**Why.** The user wants the repo to keep a record of when and why each rule
+changed, and that record has to survive the merge. A committed file lands on
+`main` with the pull request, travels to every clone, and can be read by
+anyone later, `maintain-system-spec` included. Writing the entry into the
+commit that makes the change ties the two together: the entry's commit is
+found from the file's own history, so the entry needs no sha field, and the
+binding minted over the staged tree covers the entry as well as the code.
+A later break extends only an undecided entry; once the pull request has
+decided an entry, a new break of that rule is a new entry, so it gets its
+own question.
+The pull request also has to know which breaks the user already called
+intentional, or it asks again what was already answered.
+
+One file per branch, because many branches append at once. Parallel branches
+never touch the same file, so the log never conflicts. A branch's entries are
+the ones its file did not have at the merge base, so a reused branch name
+starts clean and keeps the older entries as history.
+
+**Not approval, and not a marker the hook trusts.** *The hook is never told
+that a run is in progress* declines a file the agent writes to excuse itself.
+This log excuses nothing. An `acknowledged` entry is not a reply in a later
+conversation, and the pull request re-checks the branch from git and asks the
+user about every rule, logged or not. Files under `system-spec-changes/` are
+never a spec, never a break, and a commit touching only them is a docs skip.
+
+**Why the binding still holds.** The entry is staged before the mint, like
+any other file in the change, and nothing is staged after it. The binding
+attests to the tree that landed, which includes the entry; it does not
+attest that the entry is honest, any more than it attests to the counts in
+the `Bug-hunter:` trailer. Under *caller commits* the entry is staged before
+the result block is minted, and the caller commits it with the rest. The
+block's format does not change, because a caller parses it for trailers,
+not for a log.
+
+**Rejected.**
+- **An untracked file in the git dir.** The previous design. It was per
+  clone, so a teammate's pull request could not see it, and it was gone after
+  the merge, which leaves no record.
+- **One shared file for the whole repo.** Every branch would append to it,
+  and every pull request would conflict with every other.
+- **Removing an entry once decided.** Then the log only lists what is still
+  open, and nothing records how a rule came to read the way it does.
+- **The commit message** — a trailer or a body line. The agent writes it, a
+  new trailer key needs script, hook and library changes, and prose rewrites
+  the body while a caller that commits replaces it.
+- **No file, only the report and git.** Git can show that a rule broke, but
+  not that the user called it intentional, so the pull request would ask that
+  again before asking what to do. The user wants one approval only.
+- **Writing the entry after the commit, with its sha.** That needs a second
+  commit, or an amend, for every rule change, and splits the record from the
+  change it records.
+- **The path-safe name alone**, the first draft. The first hunt of this
+  change showed `dev/a/b` and `dev--a--b` fold to one file, and merging both
+  branches conflicts. The hash of the exact name keeps them apart.
+- **Finding an entry's commit with `git log -S` on its heading**, also the
+  first draft. It misses a later commit that extends the entry. The entry's
+  commits come from `git log -L` over its lines. The second hunt showed the
+  first range assumed one blank line between entries; it now ends at the
+  entry's last non-blank line.
+- **Appending a behavior the entry already lists**, the first fix. Two
+  commits that made the same change wrote it twice, and the pull request no
+  longer matched the entry and called it gone. Found by the second hunt. An
+  extension adds only a behavior that is not there yet.
+- **Joining behaviors with `; `**, the second fix. A sentence can hold
+  `; `, so one behavior read as two. Found by the third hunt. Each behavior
+  is its own `- new:` line.
+
+**Where this stops applying.** A rename of the branch before the pull request
+leaves its entries in the old file; the re-check finds those rules again and
+marks them `not seen at commit time`. A rebase changes the shas a status line
+cites; the heading and the re-check still match an entry. A run that does not
+commit writes nothing, so an abandoned change leaves no entry behind.
+
+## The rule check stays Grok-first, and stop and fix resumes it
+
+**Decision.** The rule-check subagent runs on the `rule_check` role, whose
+default list is Grok-first, the same as the finders': `grok-4.7-high-fast`,
+then any Grok, then Sonnet. On *stop and fix*, the subagent that found the
+break is resumed with the fix brief from `maintain-system-spec`'s
+rule-check.md to write the code change; a fresh one on the `rule_check` slug
+only if it cannot be resumed. The main agent keeps every step that asks the
+user, the commit, and the chart.
+
+**Why.** Deciding whether a rule governs a change is a judgment, but unlike
+the refuter it runs on every reviewed commit in a repo with specs, not only
+on proven bugs. That cost and speed are what set the find on Grok, for the
+reasons in *Models by role, from settings*, and they apply here too. The
+resume follows *Step 6 resumes the finder*: the agent that read the rule,
+the diff and the break holds exactly the context a fix needs. The new run
+after the fix is cold, as every new run is.
+
+**Rejected.** A heavier model first for the rule check: the check runs on
+every reviewed commit, which is the cost that set the finders on Grok.
+Sharing the refuter's list: the refuter moved to Sonnet because it runs only
+on proven bugs, and that reason does not carry over. A subagent for the
+pause or the chart: the pause must ask and wait, and the chart entry must be
+staged before the mint, which the main agent runs.
+
+## Fixes from the fourth hunt of the rule check
+
+A fourth hunt, over all three skills at once, found 29 gaps. The user chose
+ten to fix before the first commit; these four are in this skill.
+
+**The spec check reads from the root, and from the commit.** The check for
+system specs ran `git ls-files` with plain pathspecs, so from a subfolder it
+found none, and it read only the index, so staging the deletion of every
+spec made the repo look like it had none. It now uses `:(top)` pathspecs
+and also lists specs in `HEAD`, or in the parent of a commit that already
+landed, so the hook's amend path sees them too. Rejected: only `HEAD`. A
+new spec staged with the change would then be missed until its commit.
+
+**A missing check holds the commit.** A rule check that failed, or had not
+returned, did not block anything, because the gate waited only on paused
+breaks. Now nothing is committed or minted until it returns its breaks or
+`none`, and a check that fails twice is an open decision for the user.
+
+**A later iteration stages its fixes before the re-check.** The check reads
+`git diff --cached`. A fix left in the working tree was re-checked against
+the old staged diff, then staged and committed unchecked.
+
+**A skip is a decision too.** A Step 2a commit for *skip for now* now adds
+no new chart entry, like *update the spec* and *keep the old behavior*. Its
+restored rule text is the skip, not a new break.
+
+## Known gaps after the fourth hunt
+
+Found by that hunt, not shown by a failing test, and left by the user for a
+later change:
+
+- Stop and fix on a commit that already landed reads the rules at `HEAD`,
+  the loosened rule, so the repair itself pauses. Read the rules at that
+  commit's parent instead.

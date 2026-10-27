@@ -19,10 +19,11 @@ dozen symptoms hides it. The user reads the top of the report and says "do the
 first one" — so put what they would act on where they will see it.
 
 ```
-🔍 bug-hunter · 2 iterations · 6 fixed · 2 refuted · 4 reported · 1 to decide
+🔍 bug-hunter · light · 2 iterations · 6 fixed · 2 refuted · 4 reported · 1 to decide
 
   triage    REVIEW — new parsing logic in the commit detector
-  scope     2 files  +155/-24
+  scope     2 files  +155/-24  ·  179 lines → 2 finders by area  ·  not counted: test_hook.py (test)
+  models    find grok-4.7-high-fast  ·  refute sonnet-5-high
   baseline  test_hook.py 19 ✓  ·  test_skills.py 20 ✓
 
 ━━ root causes ━━━━━━━━━━━━━━━━━━━━━━━━━━━  1 cause · awaiting the user's decision
@@ -57,7 +58,7 @@ first one" — so put what they would act on where they will see it.
               why     the test did not fail — already handled
               note    test deleted
 
-── iteration 2 ──────────────────────────────────────  0 proven bugs · clean
+── iteration 2 · delta +31/-6 · 1 finder ─────────────  0 proven bugs · clean
 
 ── under ① · not fixed ──────────────────────────────────────  4 findings
 
@@ -87,6 +88,9 @@ Rules for the report:
   it affects, the recommendation, the odds, and how to ask for it. The findings
   below are grouped under the cause they belong to, so the list reads as
   evidence for a decision instead of a pile of complaints.
+- **A paused system-spec rule break goes above the root causes**, because it
+  holds the commit. Its shape, the chart block, and the header's
+  `system specs` line are in [In the report](#in-the-report).
 - **When the run aborted, the root causes are the report.** Every unresolved
   thing is an entry with the same three choices, and each says which kind of
   cause it is — **scope**, when the cause sits outside the change under review,
@@ -107,8 +111,31 @@ Rules for the report:
   carries neither line — see [When the run aborts](#when-the-run-aborts).
 - **Every finding that is not fixed needs a `why not`.** "Reported" without a
   reason is a shrug.
+- **The headline of a run that hunted names the mode**, `light` or `heavy`
+  (SKILL.md, [Light or heavy](SKILL.md#light-or-heavy)), and **the `scope`
+  line gives the count the finder number came from**: the changed lines, how
+  many finders, how they split, and every staged file left out of the count
+  with the reason. A triage skip hunted nothing, so its one line below names
+  no mode.
+- **The `models` line names the slug each role ran on**, as SKILL.md's
+  [Models by role](SKILL.md#models-by-role) picked it. Add `(after <slug>
+  failed)` when a launch moved down the list, `(not your model: <slug>)` when
+  the refuters moved off your model, and each `warning` line `models.py`
+  printed. Roles the run did not launch are left out.
 - Say `clean` for an iteration that found nothing, rather than omitting it. A
   missing iteration reads like it was skipped.
+- **A delta pass says so in its header**: `── iteration 2 · delta +31/-6 ·
+  1 finder ──`. A full pass in a light run, after a survivor outside the
+  delta, says `full re-read`. An empty delta is `── iteration 2 · no delta ·
+  clean ──`.
+- **A settled candidate is listed once**, in the iteration that settled it
+  (SKILL.md, [The settled list](SKILL.md#the-settled-list)). A later finder
+  that reports it again with its lines unchanged since it was settled is not
+  a new finding and is not printed.
+- **A light run whose iteration 3 found a survivor outside its delta** says
+  so in its `budget` root cause, and that cause's `affects` is the whole
+  change, not only iteration 3's fixes: the delta missed something, so
+  nothing after the first pass has read the rest.
 - On `SKIP` at triage, print **one line** and nothing else —
   `🔍 bug-hunter · skipped at triage — <reason>`. It is worth printing rather
   than staying silent: knowing the check ran and why it stopped is useful, and
@@ -227,7 +254,7 @@ convention, so write the subject however the repository does.
 |---|---|
 | Formatting only — whitespace, import sorting, comments | yes |
 | A pure rename or file move, no behavior change | yes |
-| Only docs, tests, specs, lockfiles, generated or vendored files | yes |
+| Only docs, tests, specs, lockfiles, generated or vendored files — the rule-change chart under `system-spec-changes/` included | yes |
 | git's own revert or merge | yes |
 | Anything else | **reviewed** |
 
@@ -538,6 +565,79 @@ trailer. An abort is report-only, so this run may not commit at all (see
 [Committing](#committing)); whenever it does, its trailer says
 `3 iterations, aborted — see report` and the new run mints its own.
 
+## The system-spec rule check
+
+SKILL.md, [Alongside Step 3](SKILL.md#alongside-step-3--the-system-spec-rule-check),
+says when this runs and what its answer does. The slots, the git commands
+that pick the specs, the brief, and the rule-change chart's format live in
+`maintain-system-spec`'s
+[rule-check.md](../maintain-system-spec/rule-check.md), because the same
+brief also runs over a whole branch (from a pull-request workflow skill when
+one is installed; none is in this repository). This skill uses its
+one-change mode.
+
+**The committed-versus-in-flight rule is the refuter's rule.** The brief
+dates the approving lines with `git log -L`, a stricter form of the
+`git log -S` check the Step 5 brief uses, for the same reason
+([DECISIONS.md](DECISIONS.md#documentation-written-in-the-same-session-is-not-evidence-of-intent)).
+`-S` on a phrase can find an older commit than the rewrite that made the
+text an approval.
+
+### In the report
+
+The header carries one `system specs` line. A paused break comes first,
+above the root causes, because it holds the commit. The run's chart entries
+follow, in the chart's own format, so the user sees exactly what will be
+written:
+
+```
+🔍 bug-hunter · 1 iteration · 0 fixed · 0 refuted · 0 reported · 1 to decide
+
+  triage        REVIEW — new refund limit in the reducer
+  scope         2 files  +41/-9
+  baseline      pytest 412 ✓
+  system specs  1 checked · 1 break paused · 1 change recorded
+
+━━ system-spec rule break · paused ━━━━━━━━━━━  commit waits for the user
+
+  REFUND-02 · billing/refunds.system-spec.md
+     rule        "A refund never exceeds the captured amount."
+     kind        code breaks it
+     change      refunds up to the authorized amount when capture is partial
+     where       billing/reducer.py:88-104
+     approved    no — no change doc committed before this change records it
+
+     1  continue       — the break is intentional; record it as acknowledged, then commit
+     2  stop and fix   — no commit; fix the code, then a new run checks it
+
+━━ rule-change chart · system-spec-changes/dev--someone--store-credit-929d780b.md ━━  1 entry
+
+  ## REFUND-05 · billing/refunds.system-spec.md
+  - branch: dev/someone/store-credit
+  - status: recorded — openspec/changes/store-credit/design.md, added in 3f2a9c1
+  - old: "A refund goes back in the currency of the charge."
+  - new: a refund can go to store credit in the account currency
+  - where: billing/credit.py:20-41
+
+── iteration 1 ──────────────────────────────────────  0 proven bugs · clean
+```
+
+- **The `system specs` line, every run that reached the check:**
+  `none in this repo — run create-system-spec to set them up`,
+  `rule check skipped — install maintain-system-spec`,
+  `no spec covers this change`, `2 checked · no break`, or the counts above.
+  A triage skip prints its one line; it adds the paused break or the chart
+  entries below it only when the check found any.
+- **A paused break is an open decision.** It counts in `N to decide`, goes
+  through the picker with its two options, and is named in the hand-off
+  footer like a root cause. Name it by rule ID, not by a number of your own.
+- **Quote the rule as committed**, not as the change left it.
+- **The chart block shows what this run writes**, in the chart's own
+  format, under the chart file's path. A paused break the user continues
+  joins it as `acknowledged`. The entries are staged with the change before
+  the mint and land in the same commit; the commit's sha is found later from
+  the chart file's history. A run that does not commit writes nothing.
+
 ## Steps 4–7 in detail
 
 ### Step 4 — Prove
@@ -572,7 +672,8 @@ Never leave a failing or discarded test in the tree.
 
 If a candidate is real but no test can express it — concurrency, deployment
 configuration, security posture, performance — do not force a fake test. Move
-it to the reported-not-fixed list in Step 9.
+it to the reported-not-fixed list in Step 9, and to the run's settled list,
+so no later finder reports it again.
 
 ### Step 5 — Refute
 
@@ -583,7 +684,8 @@ launch is the same shape as Step 3's finders (SKILL.md, *How to launch*): on
 Cursor, one `Task` per proven finding, `subagent_type: generalPurpose`,
 `run_in_background: true`. A Cursor subagent cannot see the parent
 conversation, so the prompt is the header plus the brief below, filled in.
-Do not say "the finding we discussed".
+Do not say "the finding we discussed". `model` is the refuter slug (SKILL.md,
+[Models by role](SKILL.md#models-by-role)).
 
 ```text
 You are a bug-hunter refuter. You cannot see the parent conversation or the
@@ -641,7 +743,7 @@ deleted**. Record the refutation in the report — a killed candidate is useful
 information, not a failure.
 
 One more question waits for the parallel pass to come back, because it needs the
-survivors: ask a single **fresh** agent, about the set as a whole, **do any of
+survivors: ask a single **fresh** agent, on the refuter slug, about the set as a whole, **do any of
 these fixes fight each other?** Fresh, not the resumed Step 6 finder — that
 agent is about to author the fix plan this question is meant to check. Name every case of:
 
@@ -679,17 +781,16 @@ message hands a finder what it does not have:
   order they imply;
 - the fix instructions below (prevention question, scope confinement).
 
-**Fall back to a fresh agent — the same Grok slug as Step 3,
-`grok-4.7-high-fast` on Cursor — only when that
-finder is no longer available**: the resume errors or the agent cannot be
+**Fall back to a fresh agent — on the slug Step 3 passed its finders — only
+when that finder is no longer available**: the resume errors or the agent cannot be
 reached, its session has ended, or the finder belongs to an earlier iteration
 than this Step 6 (each iteration's Step 3 spawns fresh, so each Step 6 resumes
 only its *own* iteration's finder, never a previous one's). The fresh fixer
 then gets the full brief: the files under review, the surviving findings with
 their failing tests, the refuter verdicts, and the conflict notes. On Cursor
-that fresh call is `Task` with `subagent_type: generalPurpose` and
-`model: grok-4.7-high-fast` (the Step 3 fallback if that slug is missing),
-and the prompt is self-contained. Do not pass `model` when resuming the
+that fresh call is `Task` with `subagent_type: generalPurpose` and that
+`model` (SKILL.md, [Models by role](SKILL.md#models-by-role), if it now
+fails), and the prompt is self-contained. Do not pass `model` when resuming the
 finder.
 
 Before writing the fix, it must answer: **"Is there a better approach that
@@ -705,14 +806,16 @@ recommendation, and only recommend the larger change if it has a high chance
 of success.
 
 **Keep the prompt's prefix byte-stable across iterations**, here and at Step 3 —
-these are the two Grok delegations and a run repeats each up to three
+these are the two finder-model delegations and a run repeats each up to three
 times. The Step 3 template in SKILL.md is that prefix: identical on every
 slice and every iteration, with the slice slots and any note about the last
 pass after it, not woven through it. An unchanged prefix hits prompt caching
 instead of re-billing the same context each time. Resuming the finder at
 Step 6 does not retire this rule: it governs the fallback path when a fresh
 fixer is spawned, and the Step 3 spawns themselves, which repeat every
-iteration regardless.
+iteration regardless. A delta pass uses the same template: the diff
+command is a slot below the fixed text, and the delta's context goes after
+the template with the other per-iteration notes.
 
 ### Step 7 — Verify
 
@@ -733,6 +836,9 @@ revert that fix and report it as unresolved.
 
 By default, stage the fixes **and the new regression tests**, then commit.
 
+- Not while a paused system-spec rule break waits for the user's answer. No
+  commit, no mint, no result block until then (SKILL.md,
+  [A system-spec rule break pauses the commit](SKILL.md#a-system-spec-rule-break-pauses-the-commit)).
 - `git add` the specific paths you changed. Never `git add -A`.
 - Never amend or rebase the user's existing commits.
 - If this turn already stated a commit subject, keep it unchanged.
@@ -750,7 +856,14 @@ Bug-hunter-Tree: 4b825dc642cb6eb9a060e54bf8d69288fbee4904   ← including this o
 Bug-hunter: skipped at triage (checkpoint)                  ← except this one
 Bug-hunter: 3 iterations, aborted — see report
 Bug-hunter-Tree: 4b825dc642cb6eb9a060e54bf8d69288fbee4904   ← and this one
+Bug-hunter: 2 iterations, 3 bugs fixed, heavy               ← a heavy run says so
+Bug-hunter-Tree: 4b825dc642cb6eb9a060e54bf8d69288fbee4904
 ```
+
+**Only a heavy run names its mode**, as `, heavy` at the end of the value. A
+light run adds nothing, so every older value still reads as light. The
+finder count is not in the trailer: the report has it, and the hook does not
+check counts ([What it does not attest to](#minting-the-tree-binding)).
 
 **Make the commit with `commit-with-trailer.sh`** (SKILL.md, Step 9) — subject,
 body, the `Bug-hunter:` value, and optionally the `Co-Authored-By` value. It

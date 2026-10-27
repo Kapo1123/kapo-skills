@@ -1,8 +1,14 @@
 # Decisions
 
-Some entries name `weekly-security-check` and `open-pr-workflow`. Those skills
-are not in this repository; they live in the team skills repo this copy came
-from. The decisions here hold without them.
+Some entries name `weekly-security-check`, `open-pr`, and `open-pr-workflow`.
+Those skills are not in this repository; they live in the team skills repo
+this copy came from. The decisions here hold without them.
+
+This copy omits the pull-request workflow skill that asks about each rule
+change and writes chart decisions. It is optional. Until one is added,
+decisions are settled by hand: the person runs this skill on demand, and
+chart entries stay undecided until then. Entries below that name
+`open-pr-workflow` describe that skill when it is installed.
 
 ## Why system specs exist
 
@@ -221,3 +227,263 @@ they are not a safe source of current rules. When a change is archived, its
 lasting rules move into the system spec that covers that code, checked
 against the code like any other rule. Maintain does this when asked and
 leaves the OpenSpec files as the record of the change.
+
+## The rule check brief lives here, but this skill does not run it
+
+`bug-hunter` checks each commit against the rules that cover it, and
+`open-pr-workflow` checks each branch the same way. One brief serves both,
+so they cannot disagree about what a break is or what counts as approval. It
+lives in [rule-check.md](rule-check.md), with the slots, the git commands
+that pick the specs, and the rule-change chart's format, because it reads
+specs in this skill's format and should change when the format does.
+
+It is not part of maintain's own run. Maintain checks whether specs match
+code and never decides that a rule may change. The rule check asks a
+different question: did this change break a rule, and did a person decide
+that before the code existed. Keeping it out of maintain's steps keeps
+maintain's outcomes (`clean`, `changed`, `blocked`) meaning what they mean.
+
+Rejected: keeping the brief in `bug-hunter`. `open-pr-workflow` would then
+need `bug-hunter` installed only to read a file, and installing it turns on
+its hook. Also rejected: a copy in each caller, which drifts.
+
+## A skipped rule change is an open-change line, listed until settled
+
+When the person answers *skip for now* for a rule — in a pull-request
+workflow skill's rule step when one is installed, or in a hand run when they
+choose to record the skip — the branch merges with code that does not keep
+the rule. That is the drift system specs exist to stop, so the skip has to
+be followed up after merge. Whoever records the skip commits one
+`Open change:` line under the rule, naming the
+branch, the date, and the new behavior. The rule text stays as it was: the
+line is not a rule edit and not approval, only a record that the code and the
+rule disagree and the decision is pending. Every run of this skill lists each
+one first and, on demand, asks the person to settle it: update the rule
+(which removes the line) or change the code back (after which an on-demand
+run with full coverage finds the rule holds and removes the line). An
+unanswered one is asked again next run.
+
+It lives in the spec because the spec is the one record that is in git,
+reaches `main` with the code, and is read by every later check of that rule.
+It names a branch, not a pull request, because Step 2a runs before the pull
+request exists. It is the one note about pending work the format allows. The
+ban on `TEMPORARY` notes is about text that describes what is not true yet;
+this line describes what is true now.
+
+In branch mode it is listed but does not change the outcome. Otherwise the
+pull request that skipped the rule, and every later one touching that spec,
+would stop at Step 2b for a decision the person already deferred.
+
+Rejected: no follow-up, leaving the pull request description as the only
+trace. Nothing reads it after merge, and the spec stays wrong. Also rejected:
+blocking the merge on any skip. Then *skip for now* would not exist, and the
+person would be forced to settle a rule in a pull request that is not about
+it. And rejected: storing the skip only in the rule-change chart or the pull
+request description. The chart is a committed log too, and it records the
+skip, but it is history kept apart from the rule: a check of the spec would
+not see it, and the chart's entry stays after the rule is settled. The
+description is not checked by anything. The `Open change:` line sits next to
+the rule, where this skill looks, and goes away when the rule is settled.
+
+## Fixes from the first hunt of the rule check
+
+The first `bug-hunter` run over this change found five gaps in the text
+above. Each was shown with a scratch repo or a traced caller. They were
+fixed before the first commit.
+
+**An `Open change:` line is removed only by a full, on-demand check.**
+Branch mode reads the changed files and the files a rule cites, and a
+partial check skips some files. Either can say `holds` while an unread file
+in scope still breaks the rule. Removing the line on that verdict loses the
+only record that the rule is open. So Step 6 removes it only on demand, with
+full coverage after the spot-check. Rejected: re-reading the whole scope in
+branch mode to decide. That makes every pull request pay for a full check
+of each spec it touches. Where this stops: a full check reads the scope, and
+a file outside it that still breaks the rule is not seen. That gap is the
+same for every rule.
+
+**One `Open change:` line per branch, and a second skip replaces its own.**
+The first draft kept one line per rule and added nothing when one was
+there. A later skip of a different break was then lost, and *update the
+rule* rewrote the rule to the older behavior. Replacing the old line with
+the new one was also rejected: the older branch's code may still break the
+rule. Lines from other branches stay; the settle question names them all.
+
+**Chart names carry a hash of the branch name.** `/` to `--` alone sends
+`dev/a/b` and `dev--a--b` to one file, and merging both conflicts. The
+first 8 characters of `git hash-object` of the exact name tell them apart
+and keep the readable part. Rejected: percent-encoding, which is exact but
+turns `/` into `%2F`, and a Markdown renderer decodes that in a link.
+
+**Commands fail closed or match the field's form.** The spec list runs with
+`core.quotepath=off`, because git quotes non-ASCII paths and the `grep`
+then misses them. The open-change search matches the field's form, not the
+words, so a rule that mentions them is not listed. Commits for a chart entry
+come from `git log -L` over the entry's lines, because `git log -S` on the
+heading misses a later edit. An empty merge base stops the check with a
+line, because every command after it would print nothing and exit 0.
+
+**Branch approval is judged against the lines now there.** The first draft
+compared the change doc with the first commit that ever made the break. A
+break made, reverted, approved and made again then never counted the
+approval. The first fix used the commits `git blame` names for the breaking
+lines; the second hunt replaced that (below). Text committed in the
+conversation under check still approves nothing.
+
+**Decisions follow reported work.** In a pull-request workflow skill's rule
+step, when one is installed, a decision goes into the chart only for a rule the spec-edit or fix sub-agent
+reported done. A `could not`, a time-out, or a missing line stays undecided
+and goes back to the person. Otherwise the chart said `skipped — open
+change` for a rule whose spec never got the line, and nothing would ask
+about it again. The same holds when a later break of a decided rule has a
+different new behavior: it is a new entry and a new question, not the old
+decision.
+
+## Fixes from the second hunt of the rule check
+
+A second `bug-hunter` run, over the text with the first fixes in, found ten
+more gaps, three of them in those fixes. All were fixed before the first
+commit.
+
+**The break dates from the newest point the rule held.** `git blame` moved
+the break's date to any later commit that touched the line, a comment or
+trailing spaces included. A doc written after the break then counted as
+approval. `git log -1 -S` for a removal picked a later comment that repeated
+the removed words. Both are replaced by one method: walk the branch commits
+that touched the files, find the newest at which the rule held, and take the
+next one. A formatting or comment edit does not make the rule hold, so it
+never moves the date. Where this stops: the sub-agent judges "held" at each
+commit by reading it, so the answer is only as good as that reading.
+
+**Approving text is dated by its lines.** `git log -S` on a phrase finds the
+commit that first wrote the phrase. A rewrite in this conversation that kept
+the phrase was then dated to an older commit and approved. The brief now
+lists every commit that touched the approving lines with `git log -L`; in
+one-change mode, any of them made in this conversation means no approval.
+
+**Branch mode reads commits only.** `git diff <merge base>` compares the
+working tree, so an unstaged revert hid a committed break and an unstaged
+edit was asked about as if it would ship. The rule check now diffs
+`<merge base> HEAD`. Maintain's own branch mode still includes uncommitted
+files, because it checks specs against the code in front of the person; the
+rule check decides what the pull request carries.
+
+**Smaller command fixes.** `--no-renames` on the changed-file lists, so a
+renamed test a rule cites still makes its spec due. The open-change search
+takes `.+` for the branch, because git allows a comma there. The chart entry
+range ends at the entry's last non-blank line, not two lines above the next
+heading. An extension does not repeat a behavior the entry already has.
+
+**Unfinished work is put back.** A spec edit that returned `could not` could
+leave half a line in the file, and the commit took it; a retry then kept it
+as an edit already made. Step 2a now restores those rules' lines from `HEAD`
+before the commit, and the spec-edit brief starts each rule from `HEAD`. A
+keep-old fix that did not make a rule hold no longer names that rule to
+bug-hunter, so bug-hunter can still pause on it.
+
+**Full coverage needs the file count.** A check that said `Coverage: full`
+and gave no count of files read was taken as full, which is what lets an
+`Open change:` line be removed. Now it counts as partial.
+
+## Fixes from the third hunt of the rule check
+
+A third `bug-hunter` run found thirteen more gaps, two of them in the
+second-hunt walk. All were fixed before the first commit.
+
+**The walk runs oldest first and follows renames.** The second-hunt walk
+listed commits newest first, so "the next one" was the older commit, and a
+re-break dated from the first break. It also listed only the current path,
+so a rename looked like the break. It now follows renames and lists
+oldest first; the fourth hunt changed how (below).
+
+**Branch approval reads the doc just before the break.** Taking only the
+newest commit that touched the approving lines let a trailing-space edit
+hide an approval written in time. Branch mode now asks whether the text is
+in the doc at the break commit's parent and still at `HEAD`. One-change
+mode keeps the `git log -L` dating, because there the question is whether
+this conversation touched the text.
+
+**Skip restores the old rule; update keeps only a matching rewrite.** On
+*skip for now*, a rewrite the branch had committed stayed, so a full check
+later found the code matched it and removed the `Open change:` line. Skip
+now restores the rule from the merge base. *Update the spec* kept any earlier
+rewrite, even one for a different behavior; now it keeps one only if it
+already says the new behavior.
+
+**A marked line must match the search.** A `marked` result with a hyphen
+for the em dash, or a cut-off date, was taken as done, and no later search
+found it. Step 2a now counts it done only if the line matches the search.
+
+**One `- new:` line per behavior.** The second-hunt fix joined behaviors
+with `; ` and split on it. A sentence can hold `; `, so one behavior read as
+two. Each behavior now has its own line, and a break joins an entry only by
+matching one whole line.
+
+**Paths are passed as they are.** The spec list uses `git ls-tree -z`,
+because `core.quotepath=off` still quotes `"` and `\`. The changed-file list
+and the citation search run with `core.quotepath=off`, so a non-ASCII path
+matches and the spec path printed can be opened. Paths and globs go in
+double-quoted shell variables, and `git show` takes a quoted
+`"<rev>:<path>"`, so a space or an apostrophe does not break the command.
+The single-quoted glob in `records.md`'s check prompt had the same fault
+before this change; it was fixed here too.
+
+**A missing chart heading stops the lookup.** An empty start line made
+`git log -L` list the wrong lines and exit 0. The snippet now stops and
+names the heading.
+
+## Fixes from the fourth hunt of the rule check
+
+A fourth `bug-hunter` run, over all three skills at once, found 29 gaps.
+The user chose ten to fix before the first commit; these three are here.
+
+**No `--reverse` with `--follow`.** On git 2.50 `git log --reverse
+--follow` lists only the rename and drops every commit before it, so a
+rename still looked like the break. The walk runs `git log --follow` and
+reverses the list with `awk`. Checked in a scratch repo: the reversed list
+held the break, the rename and a later edit, in that order.
+
+**A skip's restore is not a break.** *Skip for now* puts the rule back to
+its merge-base text. bug-hunter's check on that commit read the restore as
+a rule edit and added a second, undecided entry. The brief now lists that
+restore, when the caller names the rule as a Step 2a skip, as not a break,
+and a Step 2a commit adds no new entry for a rule it decides.
+
+**A failed keep-old fix is put back.** The fix brief had a sub-agent that
+returned `could not` leave its half-written code, and the fallback commit
+used when bug-hunter is missing committed it. It now puts that rule's files
+back from `HEAD` before it returns or commits.
+
+**The default branch, not `origin/main`.** The merge base is taken with the
+branch `origin/HEAD` points at, as `open-pr` does, so a repo whose default
+branch is `master` is checked instead of stopped.
+
+## Known gaps after the fourth hunt
+
+The fourth hunt found these in this skill. None could be shown with a
+failing test, and the user left them for a later change. Each line is the
+gap and the proposed fix.
+
+- `git log --follow` leaves out a merge whose conflict resolution makes the
+  break. List merge commits that touched the file too.
+- A change doc moved after the break fails the parent-and-`HEAD` check.
+  Follow the doc's renames to its path at the break commit's parent.
+- The citation search still quotes `"` and `\` in the spec path it prints.
+  Use `git grep -z -l` and `tr '\0' '\n'`.
+- The changed-file list still quotes `"`. Use `--name-only -z`.
+- `records.md`'s draft prompt has a single-quoted glob that breaks on an
+  apostrophe. It was there before this change. Use the double-quoted
+  variable form.
+- The on-demand scope list leaves out untracked files, so a full `holds`
+  can remove an `Open change:` line while an untracked file still breaks
+  the rule. Add `git ls-files --others --exclude-standard`.
+- The spec-edit brief uses one spec path at `HEAD` and the merge base, so a
+  renamed spec fails each time. Pass both paths.
+- Every detached `HEAD` shares the chart file `detached-<hash>.md`. Use the
+  starting commit's sha, or ask.
+- Step 3's open-change search and the check prompt's scope list print
+  quoted non-ASCII paths. Run both with `-c core.quotepath=off`.
+- On demand, Step 6 removes an `Open change:` line without opening the
+  cited code. Confirm the `holds` first for such a rule.
+- The open-change search accepts a line with nothing after `— `. End the
+  pattern with `— [^[:space:]]`.
