@@ -14,6 +14,7 @@ Licensed under the [MIT License](LICENSE).
 | `bug-hunter` | Catches bugs in code you asked to commit, before it is committed. Every bug is proven with a failing test first | [README](.agents/skills/bug-hunter/README.md) · [SKILL.md](.agents/skills/bug-hunter/SKILL.md) |
 | `create-system-spec` | Sets up system specs in a repo once: proposes a split by concern, writes the specs and a root `SYSTEM_SPECS.md` index. Needs `maintain-system-spec` | [README](.agents/skills/create-system-spec/README.md) · [SKILL.md](.agents/skills/create-system-spec/SKILL.md) |
 | `maintain-system-spec` | Checks system specs against the code: fixes stale specs, reports code that breaks a rule, and holds looser rules for your OK. Never edits code or commits | [README](.agents/skills/maintain-system-spec/README.md) · [SKILL.md](.agents/skills/maintain-system-spec/SKILL.md) |
+| `midday-report` | Drafts a mid-day Slack update of work so far today, asks for review or feedback where it applies, and sends only after you say so | [README](.agents/skills/midday-report/README.md) · [SKILL.md](.agents/skills/midday-report/SKILL.md) |
 
 `.agents/lib/commit-trailer/` is shared code that `bug-hunter` uses to sign
 and check its commit trailer.
