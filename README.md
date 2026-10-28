@@ -22,6 +22,8 @@ Licensed under the [MIT License](LICENSE).
 | `openspec-summarize-archive` | Writes a one-page `SUMMARY.md` into archived OpenSpec changes so past work is quick to look up | [README](.agents/skills/openspec-summarize-archive/README.md) · [SKILL.md](.agents/skills/openspec-summarize-archive/SKILL.md) |
 | `opsx-grill-me` | Interviews you about an OpenSpec change or plan, one decision at a time, until the open questions are settled | [README](.agents/skills/opsx-grill-me/README.md) · [SKILL.md](.agents/skills/opsx-grill-me/SKILL.md) |
 | `speckit-grill-me` | The same interview for a spec-kit feature spec (`specs/<name>/`) | [SKILL.md](.agents/skills/speckit-grill-me/SKILL.md) |
+| `engineering-research` | Researches a problem across GitHub, StackOverflow, Reddit, package registries, and docs, drops unmaintained options, and recommends one with links. Runs only when asked by name | [README](.agents/skills/engineering-research/README.md) · [SKILL.md](.agents/skills/engineering-research/SKILL.md) |
+| `update-work-notes` | Drafts a daily entry for an Obsidian vault's `Work Notes/` log from Google Drive meeting notes and Cursor chats, and writes only after you confirm | [README](.agents/skills/update-work-notes/README.md) · [SKILL.md](.agents/skills/update-work-notes/SKILL.md) |
 
 `.agents/lib/commit-trailer/` is shared code that `bug-hunter` uses to sign
 and check its commit trailer.
