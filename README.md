@@ -96,4 +96,4 @@ python3 .agents/skills/bug-hunter/scripts/test_caller_result.py
 generated.
 `grill-me` starts from [Matt Pocock](https://github.com/mattpocock)'s `grill-me` skill in
 [mattpocock/skills](https://github.com/mattpocock/skills) (MIT).
-Contributors: [Adam Stallard](https://github.com/adamstallard), Harsh, Cristian Cantu, Evan Luong, and [Kapo Kwok](https://github.com/Kapo1123).
+Contributors: [Adam Stallard](https://github.com/adamstallard), [Harsh](https://github.com/harshelke180502), [Cristian Cantu](https://github.com/CristianCantu), [Evan Luong](https://github.com/evanl105), and [Kapo Kwok](https://github.com/Kapo1123).
