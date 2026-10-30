@@ -171,9 +171,10 @@ the change was *meant* to do, which is where most false positives come from.
 
 ## What gets skipped
 
-Triage decides from the diff alone. It doesn't read your commit message, and
-it doesn't ask for any commit convention — write subjects however your
-repository does.
+Triage decides from the diff alone. It doesn't read your commit message.
+Subjects follow your repo's naming doc if it has one, then a clear pattern in
+`git log`. If there is neither, they use `TYPE(Scope): subject`, plus
+`(agentic)` when an agent wrote the commit.
 
 | The diff shows | Reviewed? |
 |---|---|

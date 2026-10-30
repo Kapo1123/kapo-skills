@@ -16,7 +16,8 @@ One Slack message: work done so far today, plus a review or feedback ask
 where the sources support one. Show the full draft. Send it only after the
 user says to send that exact text.
 
-This is its own skill. An end-of-day report belongs to `daily-report`.
+This is its own skill. An end-of-day report belongs to `daily-report`, which
+is not in this repo.
 
 - **Why these rules** — [DECISIONS.md](DECISIONS.md). Read it before changing
   the window, the destination, the send step, or which sources are gathered.

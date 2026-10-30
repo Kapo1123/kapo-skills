@@ -247,8 +247,13 @@ Bug-hunter: skipped at triage (docs only, no executable code)
 ## What triage skips
 
 Triage classifies the change by what the diff touches. The commit message,
-and any prefix on its subject, plays no part — this skill imposes no commit
-convention, so write the subject however the repository does.
+and any prefix on its subject, plays no part.
+
+For the subject itself: if the repo has a doc that states its naming
+convention, follow that. If it does not, and `git log` shows one clear
+repeated pattern, follow that. Otherwise use `TYPE(Scope): subject`, and add
+`(agentic)` when an agent wrote the commit. Never override a convention the
+repo already has.
 
 | The diff shows | Skipped? |
 |---|---|

@@ -5,7 +5,8 @@ local midnight, plus a review or feedback ask where that applies. You see
 the full draft, you pick the channel or person, and it sends only after you
 say so.
 
-This is not the end-of-day report. That one is `daily-report`.
+This is not the end-of-day report. That one is `daily-report`, which is not
+in this repo.
 
 Source gathering follows `daily-report`: who you are comes from each tool,
 activity you cannot tie to yourself stays out, and a link is used only when

@@ -48,3 +48,12 @@ you want.
 cases, and hidden assumptions.
 
 **It asks things it should have looked up?** Tell it to read the code for that.
+
+---
+
+## Credits
+
+The opening of [SKILL.md](SKILL.md) and its description come from Matt
+Pocock's `grill-me` skill in
+[mattpocock/skills](https://github.com/mattpocock/skills) (MIT, Copyright (c)
+2026 Matt Pocock).

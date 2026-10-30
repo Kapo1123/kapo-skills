@@ -292,8 +292,13 @@ single fast pass to the `triage` role's model ([Models by
 role](#models-by-role)). Give it the file list, the diff,
 and whether the user asked for a checkpoint (below). Ask for one of `REVIEW` or
 `SKIP` plus a one-line reason. Do not ask for a commit message first, and do
-not read a subject prefix as a signal — this skill imposes no commit
-convention ([reference.md](reference.md#what-triage-skips)).
+not read a subject prefix as a signal ([reference.md](reference.md#what-triage-skips)).
+
+**Commit subjects follow the repo.** If the repo has a doc that states its
+naming convention, follow that. If it does not, and `git log` shows one clear
+repeated pattern, follow that. Otherwise use `TYPE(Scope): subject`, and add
+`(agentic)` when an agent wrote the commit. Never override a convention the
+repo already has.
 
 `SKIP` when the diff shows:
 

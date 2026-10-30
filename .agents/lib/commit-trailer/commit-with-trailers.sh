@@ -43,6 +43,9 @@
 # - Every value is one line. Surrounding whitespace on values is trimmed. The
 #   subject is checked for emptiness after trimming, but passed to git as
 #   given.
+# - Write <subject> in the repository's own convention. With no naming doc
+#   and no clear pattern in git history, use `TYPE(Scope): subject`, plus
+#   `(agentic)` for agent-written commits.
 # - Keys hold letters, digits and dashes, and start with a letter.
 # - No key may be a prefix of another, ignoring case: git treats such keys as
 #   one (`Pro` and `Prose`). So `<Key>-Tree` belongs to <Key>.

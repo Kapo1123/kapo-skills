@@ -31,7 +31,9 @@
 #                    value into the wrong place. Allowed with no family.
 #
 #   subject          First line of the commit message, in the repository's own
-#                    convention.
+#                    convention. With no naming doc and no clear pattern in
+#                    git history, use `TYPE(Scope): subject`, plus
+#                    `(agentic)` for agent-written commits.
 #   body             Message body. May be empty (""). Do not put trailers here.
 #   bug-hunter-value Everything after "Bug-hunter: ", e.g.:
 #                       "1 iteration, 1 bug fixed"
